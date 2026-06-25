@@ -27,6 +27,17 @@ It is a re-implementation of the `balboa_worldwide_app` protocol, not a wrapper 
 | Multi-speed pumps/blower | `fan` entities (speed); single-speed → on/off `switch` |
 | Repo name | `balboa-esp32-mqtt` (sibling to the gem) |
 
+## 2a. Confirmed target spa (added after manual review)
+
+The specific spa is a **Canadian Spa Co. Cambridge, "Black Ice" Premium 240V/60Hz** (owner's manual KM-10224, at `/home/darrylb/Mega/cottage/1940 cunnington/Spa/`). The manual's wiring diagram shows the control pack stamped **"POWERED BY BALBOA"**, and the topside startup screen reads **`M 100 V 35 _201`** (Balboa software ID `M100`) — confirming this RS-485 protocol applies. Confirmed accessory inventory:
+
+- **1 × 2-speed pump** (5 HP) — topside "JETS 1" low/high. (Topside notes "JETS 2 — *only on multi-pump spas*"; this spa has no pump 2.)
+- **LED perimeter lighting + LED cup holders** → 1 controllable light.
+- **No electric blower** (air/waterfall/diverter are manual valves), **no mister/aux** (aromatherapy is a passive canister; ozone Glacier AO₃P runs automatically).
+- Temperature range 80–104 °F; Ready/Rest heating modes; configurable filter cycles.
+
+So the concrete entity set is: water heater, 1× 2-speed pump (`fan`), 1× light (`switch`), heating-mode/temp-range/temp-scale (`select`), current/target temp (`sensor`), heating/priming/filter-running (`binary_sensor`), model/version/notification (`text_sensor`), filter-cycle (`number`), clear-notification/normal-operation (`button`). The full superset remains in the component (commented in YAML) for portability and in case discovery reports more (e.g. a circulation pump).
+
 ## 3. Hardware & wiring
 
 ESP32 dev board (WROOM-32, CP2102 USB — currently flashed with Espressif AT firmware, to be overwritten by ESPHome) + separate HW-0519 auto-direction RS-485 module.
