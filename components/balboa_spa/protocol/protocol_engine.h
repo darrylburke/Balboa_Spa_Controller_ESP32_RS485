@@ -29,6 +29,20 @@ class ProtocolEngine {
   void enqueue_frame(const uint8_t *frame, size_t len);
   void toggle_item(uint8_t item_code);
 
+  void request_missing_config();
+  void set_target_temperature_raw(uint8_t raw);
+  void set_light(uint8_t index, bool on);
+  void set_aux(uint8_t index, bool on);
+  void set_mister(bool on);
+  void set_hold(bool on);
+  void set_pump(uint8_t index, uint8_t desired_speed);
+  void set_blower(uint8_t desired_level);
+  void set_heating_mode(HeatingMode desired);
+  void set_temperature_range(TempRange desired);
+  void set_temperature_scale(TempScale scale);
+  void set_time(uint8_t hour, uint8_t minute, bool h24);
+  void update_filter_cycles(const FilterCyclesData &fc);
+
   std::function<void()> on_status_update;
   std::function<void()> on_config_update;
 
