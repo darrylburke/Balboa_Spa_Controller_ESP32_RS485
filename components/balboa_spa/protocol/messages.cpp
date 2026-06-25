@@ -1,4 +1,5 @@
 #include "messages.h"
+#include <cstdio>
 
 namespace esphome {
 namespace balboa_spa {
@@ -48,6 +49,45 @@ bool decode_status(const ParsedFrame &f, SpaStatus *out) {
   out->current_temp_raw = d[2];
   out->current_temp_valid = d[2] != 0xff;
   out->target_temp_raw = d[20];
+  out->valid = true;
+  return true;
+}
+
+bool decode_control_config(const ParsedFrame &f, SpaInfo *out) {
+  if (!frame_is(f, msg::CTRL_CFG0, msg::CTRL_CFG1)) return false;
+  if (f.payload_len < 12) return false;
+  const uint8_t *d = f.payload;
+  // version = "V{d[2]}.{d[3]}"
+  snprintf(out->version, sizeof(out->version), "V%u.%u", d[2], d[3]);
+  // model = ASCII bytes [4..11], trim trailing spaces
+  char raw[9];
+  for (int i = 0; i < 8; i++) raw[i] = (char)d[4 + i];
+  raw[8] = '\0';
+  int end = 8;
+  while (end > 0 && (raw[end - 1] == ' ' || raw[end - 1] == '\0')) end--;
+  for (int i = 0; i < end; i++) out->model[i] = raw[i];
+  out->model[end] = '\0';
+  out->valid = true;
+  return true;
+}
+
+bool decode_control_config2(const ParsedFrame &f, SpaConfig *out) {
+  if (!frame_is(f, msg::CTRL_CFG2_0, msg::CTRL_CFG2_1)) return false;
+  if (f.payload_len < 5) return false;
+  const uint8_t *d = f.payload;
+  out->pumps[0] = d[0] & 0x03;
+  out->pumps[1] = (d[0] >> 2) & 0x03;
+  out->pumps[2] = (d[0] >> 4) & 0x03;
+  out->pumps[3] = (d[0] >> 6) & 0x03;
+  out->pumps[4] = d[1] & 0x03;
+  out->pumps[5] = (d[1] >> 6) & 0x03;  // matches reference ControlConfiguration2 decode
+  out->lights[0] = (d[2] & 0x03) != 0;
+  out->lights[1] = ((d[2] >> 6) & 0x03) != 0;
+  out->blower = d[3] & 0x03;
+  out->circulation_pump = ((d[3] >> 6) & 0x03) != 0;
+  out->mister = (d[4] & 0x30) != 0;
+  out->aux[0] = (d[4] & 0x01) != 0;
+  out->aux[1] = (d[4] & 0x02) != 0;
   out->valid = true;
   return true;
 }

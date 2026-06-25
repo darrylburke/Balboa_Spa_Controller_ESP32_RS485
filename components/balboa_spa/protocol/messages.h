@@ -20,6 +20,8 @@ inline bool is_ready(const ParsedFrame &f) { return frame_is(f, msg::READY0, msg
 inline bool is_new_client_cts(const ParsedFrame &f) { return frame_is(f, msg::NEW_CLIENT0, msg::NEW_CLIENT1); }
 
 bool decode_status(const ParsedFrame &f, SpaStatus *out);
+bool decode_control_config(const ParsedFrame &f, SpaInfo *out);
+bool decode_control_config2(const ParsedFrame &f, SpaConfig *out);
 
 }  // namespace balboa_spa
 }  // namespace esphome
