@@ -72,3 +72,10 @@ select:
     balboa_spa_id: spa
     type: heating_mode
     name: "Spa Heating Mode"
+
+number:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: c1_duration
+    name: "Spa Filter Cycle 1 Duration"
+    unit_of_measurement: "min"
