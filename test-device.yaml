@@ -29,3 +29,12 @@ climate:
   - platform: balboa_spa
     name: "Spa"
     balboa_spa_id: spa
+
+sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: current_temperature
+    name: "Spa Current Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
