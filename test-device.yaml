@@ -51,3 +51,10 @@ text_sensor:
     balboa_spa_id: spa
     type: model
     name: "Spa Model"
+
+switch:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: light
+    index: 1
+    name: "Spa Light"
