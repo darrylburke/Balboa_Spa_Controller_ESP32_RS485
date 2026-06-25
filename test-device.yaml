@@ -24,3 +24,8 @@ balboa_spa:
   id: spa
   uart_id: spa_uart
   read_only: true
+
+climate:
+  - platform: balboa_spa
+    name: "Spa"
+    balboa_spa_id: spa
