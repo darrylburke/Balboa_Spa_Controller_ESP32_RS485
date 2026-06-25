@@ -38,3 +38,10 @@ sensor:
     unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 0
+
+binary_sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: heating
+    name: "Spa Heating"
+    device_class: heat
