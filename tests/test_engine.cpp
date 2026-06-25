@@ -106,6 +106,6 @@ TEST(engine_set_pump_enqueues_two_toggles_from_zero) {
   // Count all toggle frames with type 0x11 to verify toggles are being sent
   size_t toggles = 0;
   for (size_t i = before; i < sink.writes.size(); i++)
-    if (sink.writes[i][4] == 0x11) toggles++;
+    if (sink.writes[i][4] == 0x11 && sink.writes[i][5] == item::PUMP1) toggles++;
   CHECK_EQ(toggles, 2);
 }
