@@ -22,6 +22,8 @@ inline bool is_new_client_cts(const ParsedFrame &f) { return frame_is(f, msg::NE
 bool decode_status(const ParsedFrame &f, SpaStatus *out);
 bool decode_control_config(const ParsedFrame &f, SpaInfo *out);
 bool decode_control_config2(const ParsedFrame &f, SpaConfig *out);
+bool decode_filter_cycles(const ParsedFrame &f, FilterCyclesData *out);
+size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc);
 
 }  // namespace balboa_spa
 }  // namespace esphome

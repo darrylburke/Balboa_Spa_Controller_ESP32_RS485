@@ -92,5 +92,35 @@ bool decode_control_config2(const ParsedFrame &f, SpaConfig *out) {
   return true;
 }
 
+bool decode_filter_cycles(const ParsedFrame &f, FilterCyclesData *out) {
+  if (!frame_is(f, msg::FILTER0, msg::FILTER1)) return false;
+  if (f.payload_len < 8) return false;
+  const uint8_t *d = f.payload;
+  out->c1_start_hour = d[0];
+  out->c1_start_minute = d[1];
+  out->c1_duration_min = (uint16_t)(d[2] * 60 + d[3]);
+  out->c2_enabled = (d[4] & 0x80) != 0;
+  out->c2_start_hour = d[4] & 0x7f;
+  out->c2_start_minute = d[5];
+  out->c2_duration_min = (uint16_t)(d[6] * 60 + d[7]);
+  out->valid = true;
+  return true;
+}
+
+size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc) {
+  uint8_t p[8];
+  p[0] = fc.c1_start_hour;
+  p[1] = fc.c1_start_minute;
+  p[2] = (uint8_t)(fc.c1_duration_min / 60);
+  p[3] = (uint8_t)(fc.c1_duration_min % 60);
+  uint8_t c2h = fc.c2_start_hour & 0x7f;
+  if (fc.c2_enabled) c2h |= 0x80;
+  p[4] = c2h;
+  p[5] = fc.c2_start_minute;
+  p[6] = (uint8_t)(fc.c2_duration_min / 60);
+  p[7] = (uint8_t)(fc.c2_duration_min % 60);
+  return build_frame(out, 0x0a, msg::FILTER0, msg::FILTER1, p, 8);
+}
+
 }  // namespace balboa_spa
 }  // namespace esphome

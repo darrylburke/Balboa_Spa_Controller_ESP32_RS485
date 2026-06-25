@@ -62,3 +62,28 @@ TEST(decode_control_config2_inventory) {
   CHECK_EQ(c.blower, 0);
   CHECK(!c.mister);
 }
+
+TEST(decode_filter_cycles_fields) {
+  auto f = parse(hexb("7e 0d 0a bf 23 08 00 02 00 94 00 01 1e d0 7e"));
+  FilterCyclesData fc{};
+  CHECK(decode_filter_cycles(f, &fc));
+  CHECK(fc.valid);
+  CHECK_EQ(fc.c1_start_hour, 8);
+  CHECK_EQ(fc.c1_start_minute, 0);
+  CHECK_EQ(fc.c1_duration_min, 120);
+  CHECK(fc.c2_enabled);
+  CHECK_EQ(fc.c2_start_hour, 20);
+  CHECK_EQ(fc.c2_start_minute, 0);
+  CHECK_EQ(fc.c2_duration_min, 90);
+}
+
+TEST(encode_filter_cycles_roundtrip) {
+  FilterCyclesData fc{};
+  fc.c1_start_hour = 8; fc.c1_start_minute = 0; fc.c1_duration_min = 120;
+  fc.c2_enabled = true; fc.c2_start_hour = 20; fc.c2_start_minute = 0; fc.c2_duration_min = 90;
+  uint8_t out[32];
+  size_t n = encode_filter_cycles(out, fc);
+  auto expect = hexb("7e 0d 0a bf 23 08 00 02 00 94 00 01 1e d0 7e");
+  CHECK_EQ(n, expect.size());
+  for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], expect[i]);
+}
