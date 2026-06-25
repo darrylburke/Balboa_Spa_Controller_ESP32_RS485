@@ -58,3 +58,11 @@ switch:
     type: light
     index: 1
     name: "Spa Light"
+
+fan:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: pump
+    index: 1
+    speed_count: 2
+    name: "Spa Pump 1"
