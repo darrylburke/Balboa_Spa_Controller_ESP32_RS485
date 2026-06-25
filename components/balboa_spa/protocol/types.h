@@ -1,6 +1,18 @@
 #pragma once
 #include <cstdint>
 
+// Arduino / ESP-IDF HAL headers define LOW=0x0 and HIGH=0x1 as plain macros.
+// Those definitions pre-empt the enum-class member names below when this header
+// is included after Arduino.h (e.g. in the full production firmware build that
+// pulls in mqtt + web_server which cause ArduinoJson to load Arduino.h early).
+// Undefine them here; they are not used in this header or its consumers.
+#ifdef LOW
+#undef LOW
+#endif
+#ifdef HIGH
+#undef HIGH
+#endif
+
 namespace esphome {
 namespace balboa_spa {
 

@@ -1,0 +1,126 @@
+# Full superset of Balboa entities. This Cambridge spa only has pump 1 (2-speed)
+# and light 1, so the others are commented out. Uncomment any that your spa's
+# discovery log (Task 12 "Detected spa" lines) reports.
+
+climate:
+  - platform: balboa_spa
+    name: "Spa"
+    balboa_spa_id: spa
+
+fan:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: pump
+    index: 1
+    speed_count: 2
+    name: "Spa Jets"
+  # - platform: balboa_spa   # pump 2 (multi-pump spas only)
+  #   balboa_spa_id: spa
+  #   type: pump
+  #   index: 2
+  #   speed_count: 2
+  #   name: "Spa Jets 2"
+  # - platform: balboa_spa   # blower (not present on Cambridge)
+  #   balboa_spa_id: spa
+  #   type: blower
+  #   speed_count: 2
+  #   name: "Spa Blower"
+
+switch:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: light
+    index: 1
+    name: "Spa Light"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: hold
+    name: "Spa Hold"
+  # - platform: balboa_spa   # mister / aux not present on Cambridge
+  #   balboa_spa_id: spa
+  #   type: mister
+  #   name: "Spa Mister"
+
+select:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: heating_mode
+    name: "Spa Heating Mode"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: temperature_range
+    name: "Spa Temperature Range"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: temperature_scale
+    name: "Spa Temperature Scale"
+
+sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: current_temperature
+    name: "Spa Current Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: target_temperature
+    name: "Spa Target Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+
+binary_sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: heating
+    name: "Spa Heating"
+    device_class: heat
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: priming
+    name: "Spa Priming"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: filter1_running
+    name: "Spa Filter Cycle 1 Running"
+  # - platform: balboa_spa   # circulation pump (uncomment if discovery reports it)
+  #   balboa_spa_id: spa
+  #   type: circulation_pump
+  #   name: "Spa Circulation Pump"
+
+text_sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: model
+    name: "Spa Model"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: version
+    name: "Spa Firmware Version"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: notification
+    name: "Spa Notification"
+
+number:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: c1_start_hour
+    name: "Spa Filter 1 Start Hour"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: c1_duration
+    name: "Spa Filter 1 Duration"
+    unit_of_measurement: "min"
+
+button:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: clear_notification
+    name: "Spa Clear Notification"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: normal_operation
+    name: "Spa Normal Operation"
