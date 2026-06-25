@@ -95,7 +95,7 @@ TEST(engine_set_pump_enqueues_two_toggles_from_zero) {
   e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
   // status with pump1 = 0; mark config so engine doesn't also enqueue requests
   feed_hex(e, "7e 1d ff af 13 00 00 64 0e 1e 00 00 00 00 00 34 00 00 02 03 "
-              "00 00 00 00 00 66 00 00 00 0e 7e");
+              "00 00 00 00 00 66 00 00 00 9b 7e");
   // pretend config known so auto-request is quiet: feed config2 + info + filter
   feed_hex(e, "7e 1a 0a bf 24 64 dc 11 00 42 46 42 50 32 30 20 20 01 3d 12 38 2e 01 0a 04 00 9b 7e");
   feed_hex(e, "7e 0b 0a bf 2e 0a 00 01 d0 00 44 6f 7e");
