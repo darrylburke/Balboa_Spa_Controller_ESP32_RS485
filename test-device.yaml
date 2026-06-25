@@ -1,7 +1,5 @@
 esphome:
   name: balboa-test
-  includes:
-    - components/balboa_spa/protocol
 external_components:
   - source:
       type: local

@@ -1,7 +1,10 @@
+import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, time
 from esphome.const import CONF_ID
+from esphome.core.config import include_file
+from esphome.helpers import walk_files
 
 CODEOWNERS = ["@darrylb"]
 DEPENDENCIES = ["uart"]
@@ -28,6 +31,16 @@ CONFIG_SCHEMA = (
 
 
 async def to_code(config):
+    # Self-containment: replicate what `esphome: includes: [components/balboa_spa/protocol]`
+    # does, so device YAMLs don't need to repeat that stanza.  Walk the protocol/
+    # subdirectory and copy each file to src/protocol/ in the PlatformIO build tree:
+    # .cpp files are picked up automatically by PlatformIO's src compiler, and headers
+    # become resolvable at the `#include "protocol/..."` paths used in balboa_spa.h.
+    protocol_dir = os.path.join(os.path.dirname(__file__), "protocol")
+    for p in walk_files(protocol_dir):
+        basename = os.path.relpath(p, os.path.dirname(protocol_dir))
+        include_file(p, basename)
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
