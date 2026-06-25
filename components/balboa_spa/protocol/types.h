@@ -32,7 +32,7 @@ struct SpaStatus {
 struct SpaInfo {
   bool valid = false;
   char model[9] = {0};
-  char version[8] = {0};
+  char version[9] = {0};
 };
 
 struct SpaConfig {
