@@ -122,5 +122,39 @@ size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc) {
   return build_frame(out, 0x0a, msg::FILTER0, msg::FILTER1, p, 8);
 }
 
+size_t encode_toggle_item(uint8_t *out, uint8_t item_code) {
+  uint8_t p[2] = {item_code, 0x00};
+  return build_frame(out, 0x0a, 0xbf, 0x11, p, 2);
+}
+
+size_t encode_set_target_temp(uint8_t *out, uint8_t temp_raw) {
+  return build_frame(out, 0x0a, 0xbf, 0x20, &temp_raw, 1);
+}
+
+size_t encode_set_time(uint8_t *out, uint8_t hour, uint8_t minute, bool h24) {
+  uint8_t p[2] = {(uint8_t)(h24 ? (hour | 0x80) : hour), minute};
+  return build_frame(out, 0x0a, 0xbf, 0x21, p, 2);
+}
+
+size_t encode_set_temp_scale(uint8_t *out, TempScale scale) {
+  uint8_t p[2] = {0x01, (uint8_t)(scale == TempScale::CELSIUS ? 0x01 : 0x00)};
+  return build_frame(out, 0x0a, 0xbf, 0x27, p, 2);
+}
+
+size_t encode_config_request(uint8_t *out) {
+  return build_frame(out, 0x0a, 0xbf, 0x04, nullptr, 0);
+}
+
+size_t encode_control_config_request(uint8_t *out, uint8_t type) {
+  uint8_t p[3];
+  switch (type) {
+    case 1: p[0] = 0x02; p[1] = 0x00; p[2] = 0x00; break;  // info (0a bf 24)
+    case 2: p[0] = 0x00; p[1] = 0x00; p[2] = 0x01; break;  // config2 (0a bf 2e)
+    case 3: p[0] = 0x01; p[1] = 0x00; p[2] = 0x00; break;  // filter cycles (0a bf 23)
+    default: p[0] = 0x00; p[1] = 0x00; p[2] = 0x00; break;
+  }
+  return build_frame(out, 0x0a, 0xbf, 0x22, p, 3);
+}
+
 }  // namespace balboa_spa
 }  // namespace esphome

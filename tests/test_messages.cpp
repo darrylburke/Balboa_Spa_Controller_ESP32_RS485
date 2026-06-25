@@ -87,3 +87,35 @@ TEST(encode_filter_cycles_roundtrip) {
   CHECK_EQ(n, expect.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], expect[i]);
 }
+
+TEST(encode_toggle_light1_bytes) {
+  uint8_t out[16];
+  size_t n = encode_toggle_item(out, item::LIGHT1);
+  auto e = hexb("7e 07 0a bf 11 11 00 93 7e");
+  CHECK_EQ(n, e.size());
+  for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
+}
+
+TEST(encode_set_temp_100f_bytes) {
+  uint8_t out[16];
+  size_t n = encode_set_target_temp(out, 100);
+  auto e = hexb("7e 06 0a bf 20 64 29 7e");
+  CHECK_EQ(n, e.size());
+  for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
+}
+
+TEST(encode_config_request_bytes) {
+  uint8_t out[16];
+  size_t n = encode_config_request(out);
+  auto e = hexb("7e 05 0a bf 04 77 7e");
+  CHECK_EQ(n, e.size());
+  for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
+}
+
+TEST(encode_control_config_request_type2_bytes) {
+  uint8_t out[16];
+  size_t n = encode_control_config_request(out, 2);
+  auto e = hexb("7e 08 0a bf 22 00 00 01 58 7e");
+  CHECK_EQ(n, e.size());
+  for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
+}
