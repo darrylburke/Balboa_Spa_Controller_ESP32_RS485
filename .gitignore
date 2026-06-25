@@ -1,0 +1,7 @@
+# ESPHome build artifacts
+.esphome/
+.pioenvs/
+.piolibdeps/
+secrets.yaml
+*.bin
+build/
