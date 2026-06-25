@@ -79,3 +79,9 @@ number:
     type: c1_duration
     name: "Spa Filter Cycle 1 Duration"
     unit_of_measurement: "min"
+
+button:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: clear_notification
+    name: "Spa Clear Notification"
