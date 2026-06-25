@@ -45,3 +45,9 @@ binary_sensor:
     type: heating
     name: "Spa Heating"
     device_class: heat
+
+text_sensor:
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: model
+    name: "Spa Model"
