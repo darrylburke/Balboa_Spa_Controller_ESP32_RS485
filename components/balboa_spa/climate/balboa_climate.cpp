@@ -34,6 +34,7 @@ void BalboaClimate::update_from_spa_() {
 void BalboaClimate::control(const climate::ClimateCall &call) {
   if (call.get_target_temperature().has_value()) {
     const SpaStatus &s = parent_->status();
+    if (!s.valid) return;
     float c = *call.get_target_temperature();
     uint8_t raw = celsius_to_spa_raw(c, s.temp_scale);
     parent_->engine().set_target_temperature_raw(raw);

@@ -110,7 +110,9 @@ void ProtocolEngine::set_blower(uint8_t desired_level) {
   uint8_t max_level = config_.blower;
   if (max_level == 0) return;
   if (desired_level > max_level) desired_level = max_level;
-  uint8_t times = (uint8_t)(((int) desired_level - (int) status_.blower + (max_level + 1)) % (max_level + 1));
+  uint8_t current = status_.blower;
+  if (current > max_level) current = max_level;
+  uint8_t times = (uint8_t)(((int) desired_level - (int) current + (max_level + 1)) % (max_level + 1));
   for (uint8_t i = 0; i < times; i++) toggle_item(item::BLOWER);
 }
 
