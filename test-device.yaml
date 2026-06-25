@@ -1,0 +1,28 @@
+esphome:
+  name: balboa-test
+  includes:
+    - components/balboa_spa/protocol
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  baud_rate: 0  # disable logging on UART0 TX; USB CDC/JTAG still shows logs
+
+uart:
+  id: spa_uart
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 115200
+  rx_buffer_size: 512
+
+balboa_spa:
+  id: spa
+  uart_id: spa_uart
+  read_only: true
