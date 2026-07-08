@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import uart, time
@@ -37,9 +38,11 @@ async def to_code(config):
     # .cpp files are picked up automatically by PlatformIO's src compiler, and headers
     # become resolvable at the `#include "protocol/..."` paths used in balboa_spa.h.
     protocol_dir = os.path.join(os.path.dirname(__file__), "protocol")
+    component_dir = os.path.dirname(protocol_dir)
     for p in walk_files(protocol_dir):
-        basename = os.path.relpath(p, os.path.dirname(protocol_dir))
-        include_file(p, basename)
+        # ESPHome 2026.x include_file() takes pathlib.Path args (was str).
+        basename = os.path.relpath(p, component_dir)  # e.g. "protocol/crc.h"
+        include_file(Path(p), Path(basename))
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
