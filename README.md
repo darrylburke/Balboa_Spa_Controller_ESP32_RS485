@@ -14,6 +14,10 @@ A C++ re-implementation of the `balboa_worldwide_app` protocol, unit-tested on h
 ## Layout
 - `components/balboa_spa/protocol/` — host-testable protocol library.
 - `components/balboa_spa/` — ESPHome hub + entity platforms.
+- `spa-serial-tester/` — Node bench CLI driving the same protocol from a laptop
+  over a USB-RS485 adapter. This is where the protocol was actually proven against
+  the real spa; useful for confirming the bus independently of the ESP32.
+  See its own README.
 - `balboa-spa.yaml` / `packages/` — device config (tailored to a Canadian Spa Co.
   Cambridge: 1× 2-speed pump, 1× light; superset commented for other spas).
 - `docs/` — wiring, bring-up, and the design spec.
