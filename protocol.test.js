@@ -75,6 +75,124 @@ test('encoders produce the authoritative TX frames', () => {
   assert.strictEqual(P.encodeControlConfigRequest(2).toString('hex'), '7e080abf220000015 87e'.replace(/\s/g, ''));
 });
 
+test('Ready is only ours when addressed to our channel', () => {
+  const ready10 = scan1('7e 05 10 bf 06 5c 7e');   // addressed to channel 0x10
+  assert.strictEqual(P.isReady(ready10), true);
+  assert.strictEqual(P.isReadyFor(ready10, 0x10), true);
+  // the bug this guards: a client on another channel must NOT treat this as its window
+  assert.strictEqual(P.isReadyFor(ready10, 0x11), false);
+  assert.strictEqual(P.isReadyFor(ready10, 0x0a), false);
+  assert.strictEqual(P.isReadyFor(ready10, 0x00), false);
+});
+
+test('new-client CTS is recognised only on the 0xfe broadcast channel', () => {
+  const cts = P.scanFrame(P.buildFrame(0xfe, 0xbf, 0x00)).frame;
+  assert.strictEqual(P.isNewClientCTS(cts), true);
+  assert.strictEqual(P.decode(cts).kind, 'new_client');
+  // same message type but on a normal channel is not a join invitation
+  const notCts = P.scanFrame(P.buildFrame(0x10, 0xbf, 0x00)).frame;
+  assert.strictEqual(P.isNewClientCTS(notCts), false);
+});
+
+test('channel assignment decodes and clamps to MAX_CHANNEL', () => {
+  const a = P.scanFrame(P.buildFrame(0xfe, 0xbf, 0x02, Buffer.from([0x11]))).frame;
+  assert.strictEqual(P.isChannelAssignment(a), true);
+  assert.strictEqual(P.channelFromAssignment(a), 0x11);
+  assert.strictEqual(P.decode(a).kind, 'id_assign');
+  assert.strictEqual(P.decode(a).channel, 0x11);
+  // out-of-range assignment is clamped, matching the reference implementation
+  const big = P.scanFrame(P.buildFrame(0xfe, 0xbf, 0x02, Buffer.from([0x9c]))).frame;
+  assert.strictEqual(P.channelFromAssignment(big), P.MAX_CHANNEL);
+});
+
+test('handshake encoders round-trip', () => {
+  const req = P.scanFrame(P.encodeIdRequest()).frame;
+  assert.strictEqual(req.src, P.BROADCAST);
+  assert.strictEqual(req.t1, 0x01);
+  assert.deepStrictEqual(Buffer.from(req.payload), P.CLIENT_SIGNATURE);
+
+  const ack = P.scanFrame(P.encodeIdAck(0x11)).frame;
+  assert.strictEqual(ack.src, 0x11);
+  assert.strictEqual(ack.t1, 0x03);
+
+  const nts = P.scanFrame(P.encodeNothingToSend(0x11)).frame;
+  assert.strictEqual(nts.src, 0x11);
+  assert.strictEqual(P.decode(nts).kind, 'nothing_to_send');
+});
+
+test('encoders transmit on the assigned channel, not a hardcoded one', () => {
+  const f = P.scanFrame(P.encodeControlConfigRequest(1, 0x11)).frame;
+  assert.strictEqual(f.src, 0x11);
+  assert.strictEqual(f.t1, 0x22);
+  assert.strictEqual(P.scanFrame(P.encodeToggleItem(P.ITEM.light1, 0x11)).frame.src, 0x11);
+  assert.strictEqual(P.scanFrame(P.encodeSetTargetTemp(100, 0x11)).frame.src, 0x11);
+});
+
+test('decode classifies the idle toggle frame seen on a live bus', () => {
+  const t = P.scanFrame(P.buildFrame(0x10, 0xbf, 0x11, Buffer.from([0x00, 0x00]))).frame;
+  const m = P.decode(t);
+  assert.strictEqual(m.kind, 'toggle');
+  assert.strictEqual(m.item, 0x00);
+});
+
+test('heating mode decodes the sparse encoding (ready_in_rest is 3, not 2)', () => {
+  // Flags-2 low bits carry the mode; build a status frame per value.
+  const withMode = (v) => {
+    const p = Buffer.alloc(24);
+    p[5] = v;
+    p[2] = 100; p[20] = 102;
+    return P.decode(P.scanFrame(P.buildFrame(0xff, 0xaf, 0x13, p)).frame).heatingMode;
+  };
+  assert.strictEqual(withMode(0), 'ready');
+  assert.strictEqual(withMode(1), 'rest');
+  assert.strictEqual(withMode(3), 'ready_in_rest');
+  assert.strictEqual(withMode(2), 'unknown');   // unused value must not crash
+});
+
+test('heating mode toggle uses item 0x51 on our channel', () => {
+  const f = P.scanFrame(P.encodeToggleItem(P.ITEM.heating_mode, 0x11)).frame;
+  assert.strictEqual(f.src, 0x11);
+  assert.strictEqual(f.t0, 0xbf);
+  assert.strictEqual(f.t1, 0x11);
+  assert.strictEqual(f.payload[0], 0x51);
+});
+
+test('encodeFilterCycles round-trips through the decoder', () => {
+  const fc = {
+    cycle1: { startHour: 20, startMinute: 0, durationMin: 120 },
+    cycle2: { enabled: true, startHour: 8, startMinute: 30, durationMin: 90 },
+  };
+  const back = P.decode(P.scanFrame(P.encodeFilterCycles(fc, 0x11)).frame);
+  assert.strictEqual(back.kind, 'filter');
+  assert.deepStrictEqual(back.cycle1, fc.cycle1);
+  assert.strictEqual(back.cycle2.enabled, true);
+  assert.strictEqual(back.cycle2.startHour, 8);
+  assert.strictEqual(back.cycle2.startMinute, 30);
+  assert.strictEqual(back.cycle2.durationMin, 90);
+});
+
+test('encodeFilterCycles reproduces the payload this spa actually sent', () => {
+  // Captured live: 14 00 02 00 88 00 02 00
+  const fc = {
+    cycle1: { startHour: 0x14, startMinute: 0, durationMin: 120 },
+    cycle2: { enabled: true, startHour: 8, startMinute: 0, durationMin: 120 },
+  };
+  const f = P.scanFrame(P.encodeFilterCycles(fc, 0x13)).frame;
+  assert.strictEqual(Buffer.from(f.payload).toString('hex'), '1400020088000200');
+  assert.strictEqual(f.src, 0x13);
+});
+
+test('disabling cycle2 clears the enable bit but keeps the hour', () => {
+  const fc = {
+    cycle1: { startHour: 6, startMinute: 15, durationMin: 60 },
+    cycle2: { enabled: false, startHour: 8, startMinute: 0, durationMin: 120 },
+  };
+  const f = P.scanFrame(P.encodeFilterCycles(fc, 0x11)).frame;
+  assert.strictEqual(f.payload[4] & 0x80, 0);
+  assert.strictEqual(f.payload[4] & 0x7f, 8);
+  assert.strictEqual(P.decode(f).cycle2.enabled, false);
+});
+
 test('build/scan round-trip', () => {
   const f = P.buildFrame(0x0a, 0xbf, 0x20, Buffer.from([0x64]));
   const r = P.scanFrame(f);
