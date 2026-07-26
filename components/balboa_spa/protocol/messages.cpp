@@ -107,7 +107,13 @@ bool decode_filter_cycles(const ParsedFrame &f, FilterCyclesData *out) {
   return true;
 }
 
-size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc) {
+uint8_t channel_from_assignment(const ParsedFrame &f) {
+  if (f.payload_len < 1) return channel::UNASSIGNED;
+  uint8_t id = f.payload[0];
+  return id > channel::MAX ? channel::MAX : id;
+}
+
+size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc, uint8_t src) {
   uint8_t p[8];
   p[0] = fc.c1_start_hour;
   p[1] = fc.c1_start_minute;
@@ -119,33 +125,46 @@ size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc) {
   p[5] = fc.c2_start_minute;
   p[6] = (uint8_t)(fc.c2_duration_min / 60);
   p[7] = (uint8_t)(fc.c2_duration_min % 60);
-  return build_frame(out, 0x0a, msg::FILTER0, msg::FILTER1, p, 8);
+  return build_frame(out, src, msg::FILTER0, msg::FILTER1, p, 8);
 }
 
-size_t encode_toggle_item(uint8_t *out, uint8_t item_code) {
+size_t encode_toggle_item(uint8_t *out, uint8_t item_code, uint8_t src) {
   uint8_t p[2] = {item_code, 0x00};
-  return build_frame(out, 0x0a, 0xbf, 0x11, p, 2);
+  return build_frame(out, src, 0xbf, 0x11, p, 2);
 }
 
-size_t encode_set_target_temp(uint8_t *out, uint8_t temp_raw) {
-  return build_frame(out, 0x0a, 0xbf, 0x20, &temp_raw, 1);
+size_t encode_set_target_temp(uint8_t *out, uint8_t temp_raw, uint8_t src) {
+  return build_frame(out, src, 0xbf, 0x20, &temp_raw, 1);
 }
 
-size_t encode_set_time(uint8_t *out, uint8_t hour, uint8_t minute, bool h24) {
+size_t encode_set_time(uint8_t *out, uint8_t hour, uint8_t minute, bool h24, uint8_t src) {
   uint8_t p[2] = {(uint8_t)(h24 ? (hour | 0x80) : hour), minute};
-  return build_frame(out, 0x0a, 0xbf, 0x21, p, 2);
+  return build_frame(out, src, 0xbf, 0x21, p, 2);
 }
 
-size_t encode_set_temp_scale(uint8_t *out, TempScale scale) {
+size_t encode_set_temp_scale(uint8_t *out, TempScale scale, uint8_t src) {
   uint8_t p[2] = {0x01, (uint8_t)(scale == TempScale::CELSIUS ? 0x01 : 0x00)};
-  return build_frame(out, 0x0a, 0xbf, 0x27, p, 2);
+  return build_frame(out, src, 0xbf, 0x27, p, 2);
 }
 
-size_t encode_config_request(uint8_t *out) {
-  return build_frame(out, 0x0a, 0xbf, 0x04, nullptr, 0);
+size_t encode_config_request(uint8_t *out, uint8_t src) {
+  return build_frame(out, src, 0xbf, 0x04, nullptr, 0);
 }
 
-size_t encode_control_config_request(uint8_t *out, uint8_t type) {
+size_t encode_id_request(uint8_t *out) {
+  uint8_t p[3] = {0x02, 0xf1, 0x73};
+  return build_frame(out, channel::BROADCAST, msg::ID_REQ0, msg::ID_REQ1, p, 3);
+}
+
+size_t encode_id_ack(uint8_t *out, uint8_t id) {
+  return build_frame(out, id, msg::ID_ACK0, msg::ID_ACK1, nullptr, 0);
+}
+
+size_t encode_nothing_to_send(uint8_t *out, uint8_t id) {
+  return build_frame(out, id, msg::NOTHING0, msg::NOTHING1, nullptr, 0);
+}
+
+size_t encode_control_config_request(uint8_t *out, uint8_t type, uint8_t src) {
   uint8_t p[3];
   switch (type) {
     case 1: p[0] = 0x02; p[1] = 0x00; p[2] = 0x00; break;  // info (0a bf 24)
@@ -153,7 +172,7 @@ size_t encode_control_config_request(uint8_t *out, uint8_t type) {
     case 3: p[0] = 0x01; p[1] = 0x00; p[2] = 0x00; break;  // filter cycles (0a bf 23)
     default: p[0] = 0x00; p[1] = 0x00; p[2] = 0x00; break;
   }
-  return build_frame(out, 0x0a, 0xbf, 0x22, p, 3);
+  return build_frame(out, src, 0xbf, 0x22, p, 3);
 }
 
 }  // namespace balboa_spa

@@ -6,17 +6,18 @@ external_components:
       path: components
 
 esp32:
-  board: esp32dev
+  board: esp32-c3-devkitm-1
+  variant: esp32c3
   framework:
     type: arduino
 
 logger:
-  baud_rate: 0  # disable logging on UART0 TX; USB CDC/JTAG still shows logs
+  # C3: RS-485 is on UART1 (GPIO4/5); logs stream over USB Serial/JTAG.
 
 uart:
   id: spa_uart
-  tx_pin: GPIO17
-  rx_pin: GPIO16
+  tx_pin: GPIO4   # -> HW-0519 RXD  (ESP32-C3 UART1)
+  rx_pin: GPIO5   # <- HW-0519 TXD
   baud_rate: 115200
   rx_buffer_size: 512
 

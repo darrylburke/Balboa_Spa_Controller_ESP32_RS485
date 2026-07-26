@@ -1,0 +1,16 @@
+{
+  "name": "spa-serial-tester",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Balboa RS-485 bench tester over a local USB (Waveshare FT232/SP485) adapter",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node spa-tester.js"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
+}

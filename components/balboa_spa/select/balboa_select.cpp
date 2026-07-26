@@ -13,8 +13,8 @@ void BalboaSelect::update_from_spa_() {
   std::string v;
   switch (type_) {
     case SEL_HEATING_MODE:
-      v = (s.heating_mode == HeatingMode::REST) ? "rest"
-        : (s.heating_mode == HeatingMode::READY_IN_REST) ? "ready" : "ready";
+      // The select exposes only ready/rest; READY_IN_REST reports as "ready".
+      v = (s.heating_mode == HeatingMode::REST) ? "rest" : "ready";
       break;
     case SEL_TEMP_RANGE:
       v = (s.temp_range == TempRange::HIGH) ? "high" : "low";

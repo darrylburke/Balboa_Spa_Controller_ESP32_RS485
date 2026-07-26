@@ -23,4 +23,10 @@ two wires read ~2–3 V: the slightly higher one is **RS-485+**, the slightly lo
 **RS-485-**. Swapping +/- only produces garbage (non-destructive) — swap back to fix.
 
 This spa: **Canadian Spa Co. Cambridge (Black Ice), Balboa pack** — replace/stand in
-for the WiFi module position; ESP32 is the sole client at bus address 0x0A.
+for the WiFi module position.
+
+**Bus addressing:** the ESP32 does *not* use a fixed address. It starts unregistered
+and negotiates a channel with the controller (`FE BF 00` → `FE BF 01` → `FE BF 02`
+→ ack), then transmits only in a Ready addressed to that channel. This spa already
+has another client holding `0x10`, so a hardcoded address collides with it. In
+`read_only: true` mode the ESP32 never joins the bus at all and stays fully passive.

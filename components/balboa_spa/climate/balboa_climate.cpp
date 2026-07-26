@@ -10,12 +10,13 @@ void BalboaClimate::setup() {
 
 climate::ClimateTraits BalboaClimate::traits() {
   auto traits = climate::ClimateTraits();
-  traits.set_supports_current_temperature(true);
+  // ESPHome 2026.x: current-temperature/action support are feature flags
+  // (set_supports_current_temperature()/set_supports_action() were removed).
+  traits.set_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE | climate::CLIMATE_SUPPORTS_ACTION);
   traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
   traits.set_visual_min_temperature(10.0);   // 50 F
   traits.set_visual_max_temperature(40.0);   // 104 F
   traits.set_visual_temperature_step(0.5);
-  traits.set_supports_action(true);
   return traits;
 }
 

@@ -17,7 +17,8 @@ namespace esphome {
 namespace balboa_spa {
 
 enum class TempScale : uint8_t { FAHRENHEIT = 0, CELSIUS = 1 };
-enum class HeatingMode : uint8_t { READY = 0, REST = 1, READY_IN_REST = 2 };
+// Ready-in-Rest is 3, not 2 — the encoding is sparse (value 2 is unused).
+enum class HeatingMode : uint8_t { READY = 0, REST = 1, READY_IN_REST = 3 };
 enum class TempRange : uint8_t { LOW = 0, HIGH = 1 };
 
 struct SpaStatus {
