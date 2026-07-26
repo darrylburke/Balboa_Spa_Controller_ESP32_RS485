@@ -18,10 +18,36 @@ A C++ re-implementation of the `balboa_worldwide_app` protocol, unit-tested on h
   Cambridge: 1× 2-speed pump, 1× light; superset commented for other spas).
 - `docs/` — wiring, bring-up, and the design spec.
 
+## Bus addressing (important)
+The RS-485 bus is shared and **addressed**. A client must ask the controller for a
+channel and may then transmit *only* in a Ready addressed to that channel:
+
+```
+controller → FE BF 00           "any new clients?"
+client     → FE BF 01 02 F1 73  ID request
+controller → FE BF 02 <id>      assigns a channel (max 0x2f)
+client     → <id> BF 03         ack
+then: transmit only on <id> BF 06, as src <id>; send <id> BF 07 when idle
+```
+
+Never hardcode an address. Another client (the topside panel or a WiFi module)
+already holds one — typically `0x10` — and answers *every* one of its Ready
+windows, so a hardcoded client transmits on top of it and both frames are lost.
+
+Because addressing is negotiated, **coexistence works**: this firmware runs happily
+alongside the existing client, and the controller alternates polling between them.
+
+The assigned channel is saved to NVS and resumed on boot. This matters: the
+controller never reclaims a channel (there is no deregister message in the
+protocol), so a gateway that re-negotiates on every reboot leaks one each time and
+degrades the bus. If the spa stops polling our saved channel — e.g. after a spa
+power cycle, which *is* what clears them — the firmware detects it and rejoins.
+
 ## Notes
 - Cycle-2 filter is auto-enabled when its duration > 0 (no separate enable entity).
-- The ESP32 must be the sole add-on client on the RS-485 bus (replace the Balboa
-  WiFi module); coexistence is out of scope.
+- `read_only: true` is fully passive: the firmware does not even join the bus.
+- Heating mode is a sparse encoding — Ready-in-Rest is **3**, not 2.
+- Requires a recent ESPHome (uses `climate_schema()`); see `docs/bring-up.md`.
 
 ## Credits
 Protocol reverse-engineering from ccutrer's `balboa_worldwide_app` gem.

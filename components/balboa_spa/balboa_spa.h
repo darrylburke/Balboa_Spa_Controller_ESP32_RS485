@@ -1,6 +1,7 @@
 #pragma once
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/uart/uart.h"
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -44,6 +45,9 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   bool discovery_logged_{false};
   uint32_t last_time_sync_{0};
   uint8_t rx_chunk_[128];
+  // Assigned bus channel, persisted across reboots. Without this every restart
+  // negotiates a NEW channel and the controller polls the old one forever.
+  ESPPreferenceObject channel_pref_;
 };
 
 }  // namespace balboa_spa

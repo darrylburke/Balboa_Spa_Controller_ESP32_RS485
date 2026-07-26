@@ -4,6 +4,7 @@
 #include <functional>
 #include "types.h"
 #include "frame.h"
+#include "messages.h"   // channel:: constants used below
 
 namespace esphome {
 namespace balboa_spa {
@@ -14,7 +15,27 @@ class ProtocolEngine {
 
   void set_write_fn(WriteFn fn) { write_fn_ = std::move(fn); }
   void set_read_only(bool ro) { read_only_ = ro; }
-  void set_address(uint8_t addr) { address_ = addr; }
+  // Resume a channel the controller assigned to us in an earlier session (e.g.
+  // reloaded from NVS after a reboot). The controller keeps polling a channel
+  // forever once assigned, so we can answer it directly with no handshake —
+  // verified on hardware. This is what stops every reboot leaking a new channel.
+  void restore_channel(uint8_t id) {
+    if (id == channel::UNASSIGNED || id > channel::MAX) return;
+    channel_ = id;
+  }
+
+  uint8_t channel() const { return channel_; }
+  bool registered() const { return channel_ != channel::UNASSIGNED; }
+
+  // Fired once when the controller assigns a channel via the handshake, so the
+  // caller can persist it. Not fired on restore_channel().
+  std::function<void(uint8_t)> on_channel_assigned;
+
+  // Fired when a held channel goes stale and is released (spa forgot us).
+  std::function<void()> on_channel_stale;
+
+  uint8_t config_attempts() const { return config_attempts_; }
+  bool gave_up_on_config() const { return config_attempts_ >= CONFIG_MAX_ATTEMPTS; }
 
   void feed(const uint8_t *data, size_t len);
 
@@ -49,10 +70,23 @@ class ProtocolEngine {
  protected:
   void process_frame(const ParsedFrame &f);
   bool pop_and_send_();
+  void send_now_(const uint8_t *frame, size_t len);   // bypasses the queue (handshake frames)
+  void request_channel_();
+  void adopt_channel_(uint8_t id);
+  void maybe_request_config_();
 
   static constexpr size_t RX_CAP = 256;
   static constexpr size_t Q_SLOTS = 16;
   static constexpr size_t Q_FRAME_CAP = 16;
+  // Config requests are retried, because a single dropped response otherwise
+  // stalls have_full_config() forever (observed once on real hardware). Retries
+  // are paced by Status broadcasts (~1/s) and bounded so we never spam the bus.
+  static constexpr uint16_t CONFIG_RETRY_STATUSES = 10;
+  static constexpr uint8_t CONFIG_MAX_ATTEMPTS = 20;
+  // If the controller stops offering us windows for this many Status broadcasts,
+  // our channel is stale (e.g. the spa was power-cycled and forgot us). Drop back
+  // to unassigned so the join handshake runs again instead of answering nobody.
+  static constexpr uint16_t STALE_CHANNEL_STATUSES = 30;
 
   uint8_t rx_[RX_CAP];
   size_t rx_len_ = 0;
@@ -63,8 +97,12 @@ class ProtocolEngine {
 
   WriteFn write_fn_;
   bool read_only_ = false;
-  uint8_t address_ = 0x0a;
+  // Starts unassigned: we stay silent until the controller gives us a channel.
+  uint8_t channel_ = channel::UNASSIGNED;
   bool seen_status_ = false;
+  uint8_t config_attempts_ = 0;
+  uint16_t statuses_since_config_req_ = 0;
+  uint16_t statuses_since_our_window_ = 0;
 
   SpaStatus status_;
   SpaConfig config_;

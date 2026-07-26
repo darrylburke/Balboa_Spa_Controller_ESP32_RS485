@@ -77,12 +77,43 @@ TEST(decode_filter_cycles_fields) {
   CHECK_EQ(fc.c2_duration_min, 90);
 }
 
+TEST(decode_status_heating_mode_sparse_encoding) {
+  // Ready-in-Rest is 3, not 2 — the encoding skips 2. Indexing a dense 0..2
+  // table here silently mis-decodes whenever the spa is in Ready-in-Rest.
+  auto mode_for = [](uint8_t flags2) {
+    uint8_t p[24] = {0};
+    p[2] = 100; p[5] = flags2; p[20] = 102;
+    uint8_t frame[64];
+    size_t n = build_frame(frame, 0xff, msg::STATUS0, msg::STATUS1, p, 24);
+    ParsedFrame f{};
+    size_t consumed = 0;
+    scan_frame(frame, n, &f, &consumed);
+    SpaStatus s{};
+    decode_status(f, &s);
+    return s.heating_mode;
+  };
+  CHECK(mode_for(0) == HeatingMode::READY);
+  CHECK(mode_for(1) == HeatingMode::REST);
+  CHECK(mode_for(3) == HeatingMode::READY_IN_REST);
+}
+
+TEST(encode_toggle_heating_mode_item_code) {
+  uint8_t out[16];
+  size_t n = encode_toggle_item(out, item::HEATING_MODE, 0x11);
+  ParsedFrame f{};
+  size_t consumed = 0;
+  scan_frame(out, n, &f, &consumed);
+  CHECK_EQ(f.src, 0x11);
+  CHECK_EQ(f.type1, 0x11);
+  CHECK_EQ(f.payload[0], 0x51);
+}
+
 TEST(encode_filter_cycles_roundtrip) {
   FilterCyclesData fc{};
   fc.c1_start_hour = 8; fc.c1_start_minute = 0; fc.c1_duration_min = 120;
   fc.c2_enabled = true; fc.c2_start_hour = 20; fc.c2_start_minute = 0; fc.c2_duration_min = 90;
   uint8_t out[32];
-  size_t n = encode_filter_cycles(out, fc);
+  size_t n = encode_filter_cycles(out, fc, 0x0a);
   auto expect = hexb("7e 0d 0a bf 23 08 00 02 00 94 00 01 1e d0 7e");
   CHECK_EQ(n, expect.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], expect[i]);
@@ -90,7 +121,7 @@ TEST(encode_filter_cycles_roundtrip) {
 
 TEST(encode_toggle_light1_bytes) {
   uint8_t out[16];
-  size_t n = encode_toggle_item(out, item::LIGHT1);
+  size_t n = encode_toggle_item(out, item::LIGHT1, 0x0a);
   auto e = hexb("7e 07 0a bf 11 11 00 93 7e");
   CHECK_EQ(n, e.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
@@ -98,7 +129,7 @@ TEST(encode_toggle_light1_bytes) {
 
 TEST(encode_set_temp_100f_bytes) {
   uint8_t out[16];
-  size_t n = encode_set_target_temp(out, 100);
+  size_t n = encode_set_target_temp(out, 100, 0x0a);
   auto e = hexb("7e 06 0a bf 20 64 29 7e");
   CHECK_EQ(n, e.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
@@ -106,7 +137,7 @@ TEST(encode_set_temp_100f_bytes) {
 
 TEST(encode_config_request_bytes) {
   uint8_t out[16];
-  size_t n = encode_config_request(out);
+  size_t n = encode_config_request(out, 0x0a);
   auto e = hexb("7e 05 0a bf 04 77 7e");
   CHECK_EQ(n, e.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
@@ -114,7 +145,7 @@ TEST(encode_config_request_bytes) {
 
 TEST(encode_control_config_request_type2_bytes) {
   uint8_t out[16];
-  size_t n = encode_control_config_request(out, 2);
+  size_t n = encode_control_config_request(out, 2, 0x0a);
   auto e = hexb("7e 08 0a bf 22 00 00 01 58 7e");
   CHECK_EQ(n, e.size());
   for (size_t i = 0; i < n; i++) CHECK_EQ(out[i], e[i]);
