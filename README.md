@@ -47,6 +47,21 @@ protocol), so a gateway that re-negotiates on every reboot leaks one each time a
 degrades the bus. If the spa stops polling our saved channel — e.g. after a spa
 power cycle, which *is* what clears them — the firmware detects it and rejoins.
 
+## Temperature units
+**Everything published is Celsius**, regardless of the spa's own scale setting —
+the climate entity and both temperature sensors agree. Conversion happens only at
+the protocol boundary (`spa_raw_to_celsius` / `celsius_to_spa_raw`).
+
+This matters because an entity's `unit_of_measurement` is fixed at compile time
+while the spa's scale can be changed at runtime (including via
+`select/spa_temperature_scale`). Publishing the spa's native scale therefore
+produced Celsius values labelled `°F` as soon as anyone flipped the setting — and
+with `device_class: temperature`, Home Assistant would then "convert" them again.
+
+`spa_raw_to_native()` still exists for display/diagnostics, but must never back an
+entity. Front-ends that want °F should read `select/spa_temperature_scale/state`
+and convert, or let Home Assistant do it via `device_class: temperature`.
+
 ## Notes
 - Cycle-2 filter is auto-enabled when its duration > 0 (no separate enable entity).
 - `read_only: true` is fully passive: the firmware does not even join the bus.

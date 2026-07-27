@@ -33,6 +33,10 @@ mqtt:
   password: !secret mqtt_password
   topic_prefix: spa
   discovery: true
+  # Uses ESPHome's default discovery prefix, "homeassistant". HA's MQTT
+  # integration is set to match. Deliberately NOT "ha": ~131 unrelated config
+  # topics live under ha/, and pointing HA there would auto-create duplicates of
+  # devices already declared by hand in configuration.yaml.
 
 ota:
   - platform: esphome
@@ -58,7 +62,8 @@ balboa_spa:
   id: spa
   uart_id: spa_uart
   time_id: sntp_time
-  read_only: true   # FLIP TO false ONLY AFTER confirming clean decode (see docs/bring-up)
+  read_only: true       # FLIP TO false ONLY AFTER confirming clean decode (see docs/bring-up)
+  uart_selftest: false  # BRING-UP ONLY: RS-485 module disconnected, TX jumpered to RX
 
 packages:
   spa_entities: !include packages/spa_full_superset.yaml

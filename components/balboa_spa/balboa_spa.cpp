@@ -1,5 +1,6 @@
 #include "balboa_spa.h"
 #include "esphome/core/log.h"
+#include <cstring>
 
 namespace esphome {
 namespace balboa_spa {
@@ -34,6 +35,12 @@ void BalboaSpa::setup() {
     this->channel_pref_.save(&none);
   };
   engine_.on_status_update = [this]() {
+    this->last_status_ms_ = millis();
+    if (!this->bus_connected_) {
+      this->bus_connected_ = true;
+      ESP_LOGI(TAG, "RS-485 bus connected (Status received)");
+      this->bus_cb_.call();
+    }
     this->status_cb_.call();
     this->maybe_sync_time_();
   };
@@ -62,8 +69,91 @@ void BalboaSpa::loop() {
   while (avail > 0) {
     int n = avail > (int) sizeof(rx_chunk_) ? (int) sizeof(rx_chunk_) : avail;
     this->read_array(rx_chunk_, n);
+    rx_bytes_ += (uint32_t) n;
     engine_.feed(rx_chunk_, n);
     avail -= n;
+  }
+
+  // Bring-up diagnostic: report what the UART is actually seeing. The three
+  // outcomes point at different faults, so print them until the bus is healthy:
+  //   bytes=0                  -> nothing reaching RX: wiring, TX/RX not crossed,
+  //                               wrong pins, or no signal on A/B
+  //   bytes>0, frames=0        -> signal present but never decodes: A/B swapped
+  //                               (or wrong baud)
+  //   frames>0                 -> bus is healthy
+  uint32_t now = millis();
+
+  // UART loopback self-test. Proves the ESP32's own UART + GPIO pins work,
+  // independently of the RS-485 module. Jumper TX->RX with the module removed:
+  // bytes coming back means the ESP32 side is healthy and the fault is the
+  // module or its wiring; still zero means the problem is here, not out there.
+  if (uart_selftest_ && (now - last_selftest_ms_) > 3000) {
+    last_selftest_ms_ = now;
+    static const uint8_t pattern[8] = {0x7e, 0x55, 0xaa, 0x0f, 0xf0, 0x00, 0xff, 0x7e};
+
+    // Drain anything already buffered so noise from a previous interval cannot
+    // be mistaken for our echo.
+    while (this->available()) { uint8_t d; this->read_byte(&d); }
+
+    this->write_array(pattern, sizeof(pattern));
+    this->flush();
+    delay(20);   // 8 bytes @115200 is ~0.7ms; allow ample margin
+
+    // Compare CONTENT, not just a count. Checking "did any bytes arrive" is
+    // useless here: a floating rx pin produces tens of bytes/sec of EMI, which
+    // makes a count-based test report success even with no jumper fitted.
+    uint8_t got[16];
+    size_t n = 0;
+    while (this->available() && n < sizeof(got)) { this->read_byte(&got[n]); n++; }
+    bool match = (n >= sizeof(pattern)) &&
+                 std::memcmp(got, pattern, sizeof(pattern)) == 0;
+    selftest_sent_ += sizeof(pattern);
+    rx_bytes_ += (uint32_t) n;   // keep the byte counter honest
+
+    if (match) {
+      ESP_LOGI(TAG, "UART selftest: PASS — pattern echoed exactly (ESP32 UART + pins are good)");
+    } else if (n == 0) {
+      ESP_LOGW(TAG, "UART selftest: FAIL — nothing came back (jumper missing, wrong pins, or dead GPIO)");
+    } else {
+      ESP_LOGW(TAG, "UART selftest: FAIL — got %u bytes but they do not match the pattern "
+                    "(first=0x%02X) — likely noise, not a real echo", (unsigned) n, got[0]);
+    }
+    return;   // don't also print the bus diag this pass
+  }
+
+  if (!bus_connected_ && (now - last_diag_ms_) > 10000) {
+    uint32_t elapsed = now - last_diag_ms_;
+    uint32_t delta = rx_bytes_ - last_rx_bytes_;
+    uint32_t rate = elapsed ? (delta * 1000UL) / elapsed : 0;   // bytes/sec
+    last_diag_ms_ = now;
+    last_rx_bytes_ = rx_bytes_;
+
+    // Rate is what discriminates, not the cumulative count. A healthy Balboa bus
+    // runs ~1000 B/s. A FLOATING rx pin still produces tens of bytes/sec of EMI
+    // noise, which looks like "signal" if you only watch the total go up.
+    const char *verdict;
+    if (rate == 0)
+      verdict = "NO BYTES (rx pin held / nothing arriving)";
+    else if (rate < NOISE_FLOOR_BPS)
+      verdict = "NOISE ONLY — rx pin is probably FLOATING (module not wired to RX?)";
+    else if (engine_.frames_decoded() == 0)
+      verdict = "real signal but nothing decodes (swap A+/B-, or wrong baud)";
+    else
+      verdict = "frames decoding, awaiting Status";
+
+    ESP_LOGI(TAG, "RS-485 diag: %u B/s (total=%u) frames=%u — %s",
+             (unsigned) rate, (unsigned) rx_bytes_,
+             (unsigned) engine_.frames_decoded(), verdict);
+  }
+
+  // Detect the bus going quiet. Every published state topic is retained, so
+  // without this the last values sit on the broker looking current while the
+  // spa is actually unreachable.
+  if (this->bus_connected_ && (millis() - this->last_status_ms_) > BUS_TIMEOUT_MS) {
+    this->bus_connected_ = false;
+    ESP_LOGW(TAG, "RS-485 bus lost (no Status for %ums); published values are now stale",
+             (unsigned) BUS_TIMEOUT_MS);
+    this->bus_cb_.call();
   }
 }
 

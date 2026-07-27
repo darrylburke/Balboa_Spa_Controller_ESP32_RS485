@@ -14,6 +14,7 @@ BINARY_TYPES = {
     "circulation_pump": SpaBinaryType.CIRCULATION_PUMP,
     "filter1_running": SpaBinaryType.FILTER1_RUNNING,
     "filter2_running": SpaBinaryType.FILTER2_RUNNING,
+    "bus_connected": SpaBinaryType.BUS_CONNECTED,
 }
 
 CONFIG_SCHEMA = binary_sensor.binary_sensor_schema(BalboaBinarySensor).extend(

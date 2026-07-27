@@ -16,6 +16,7 @@ BalboaSpa = balboa_spa_ns.class_("BalboaSpa", cg.Component, uart.UARTDevice)
 
 CONF_BALBOA_SPA_ID = "balboa_spa_id"
 CONF_READ_ONLY = "read_only"
+CONF_UART_SELFTEST = "uart_selftest"
 CONF_TIME_ID = "time_id"
 
 CONFIG_SCHEMA = (
@@ -23,6 +24,9 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(BalboaSpa),
             cv.Optional(CONF_READ_ONLY, default=True): cv.boolean,
+            # Bring-up only: transmit a pattern and check it reads back.
+            # DISCONNECT the RS-485 module first and jumper TX->RX directly.
+            cv.Optional(CONF_UART_SELFTEST, default=False): cv.boolean,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
         }
     )
@@ -48,6 +52,7 @@ async def to_code(config):
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
     cg.add(var.set_read_only(config[CONF_READ_ONLY]))
+    cg.add(var.set_uart_selftest(config[CONF_UART_SELFTEST]))
     if CONF_TIME_ID in config:
         rtc = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time(rtc))

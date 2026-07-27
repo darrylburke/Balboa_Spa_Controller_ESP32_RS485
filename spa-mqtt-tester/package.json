@@ -1,0 +1,15 @@
+{
+  "name": "spa-mqtt-tester",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Balboa spa bench tester over MQTT (the gateway's published surface)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node mqtt-tester.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0"
+  }
+}
