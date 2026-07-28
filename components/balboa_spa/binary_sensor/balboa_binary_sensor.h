@@ -6,7 +6,7 @@
 namespace esphome {
 namespace balboa_spa {
 
-enum SpaBinaryType { HEATING, PRIMING, CIRCULATION_PUMP, FILTER1_RUNNING, FILTER2_RUNNING };
+enum SpaBinaryType { HEATING, PRIMING, CIRCULATION_PUMP, FILTER1_RUNNING, FILTER2_RUNNING, BUS_CONNECTED };
 
 class BalboaBinarySensor : public binary_sensor::BinarySensor, public Component {
  public:

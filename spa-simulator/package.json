@@ -1,0 +1,9 @@
+{
+  "name": "spa-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Virtual Balboa spa over MQTT — mirrors the ESPHome gateway's published surface",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node spa-sim.js", "test": "node --test" },
+  "dependencies": { "mqtt": "^5.10.0" }
+}

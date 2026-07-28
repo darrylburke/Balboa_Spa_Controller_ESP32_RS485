@@ -81,12 +81,14 @@ void ProtocolEngine::feed(const uint8_t *data, size_t len) {
     size_t consumed = 0;
     ScanResult r = scan_frame(rx_, rx_len_, &f, &consumed);
     if (r == ScanResult::FRAME) {
+      frames_decoded_++;
       process_frame(f);
       // shift out consumed bytes
       std::memmove(rx_, rx_ + consumed, rx_len_ - consumed);
       rx_len_ -= consumed;
     } else {  // NEED_MORE
       if (consumed > 0) {
+        noise_bytes_ += consumed;   // discarded without yielding a frame
         std::memmove(rx_, rx_ + consumed, rx_len_ - consumed);
         rx_len_ -= consumed;
       }

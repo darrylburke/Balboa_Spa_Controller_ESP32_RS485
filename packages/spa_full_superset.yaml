@@ -60,16 +60,21 @@ sensor:
     balboa_spa_id: spa
     type: current_temperature
     name: "Spa Current Temperature"
-    unit_of_measurement: "°F"
+    # Celsius is the canonical unit on the wire (matches the climate entity).
+    # device_class: temperature lets Home Assistant display °F if you prefer;
+    # the SaaS panel converts using select/spa_temperature_scale.
+    unit_of_measurement: "°C"
     device_class: temperature
-    accuracy_decimals: 0
+    state_class: measurement
+    accuracy_decimals: 1
   - platform: balboa_spa
     balboa_spa_id: spa
     type: target_temperature
     name: "Spa Target Temperature"
-    unit_of_measurement: "°F"
+    unit_of_measurement: "°C"
     device_class: temperature
-    accuracy_decimals: 0
+    state_class: measurement
+    accuracy_decimals: 1
 
 binary_sensor:
   - platform: balboa_spa
@@ -85,6 +90,15 @@ binary_sensor:
     balboa_spa_id: spa
     type: filter1_running
     name: "Spa Filter Cycle 1 Running"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    # Liveness of the RS-485 link itself. All state topics are retained, and the
+    # MQTT LWT only fires if the ESP32 loses the broker — so if the spa or the
+    # wiring dies while the ESP32 stays online, every retained value would look
+    # current. Gate the UI on this, not just on {prefix}/status.
+    type: bus_connected
+    name: "Spa Bus Connected"
+    device_class: connectivity
   # - platform: balboa_spa   # circulation pump (uncomment if discovery reports it)
   #   balboa_spa_id: spa
   #   type: circulation_pump

@@ -28,12 +28,19 @@ false negative. Confirm a build really contains your code with
 `strings firmware.elf` or `nm -C firmware.elf`.
 
 ## Stage 1 — simulator (no real spa)
-The reference gem ships a spa simulator. Run it on a USB-RS485 dongle:
-```
-cd ../balboa_worldwide_app && bundle exec exe/bwa_server /dev/ttyUSB0
-```
-Wire the RS-485 A+/B- to the dongle's A/B, flash `balboa-spa.yaml` with
-`read_only: false` for this bench test, and confirm in the ESPHome logs:
+> **Note:** the reference gem's `bwa_server` is **not** an RS-485 simulator. It is
+> `TCPServer.open(4257)` and emulates the Balboa *WiFi module's TCP* interface;
+> it takes no serial-port argument and cannot drive a USB-RS485 dongle. An
+> earlier version of this doc claimed otherwise — that step never worked.
+
+To exercise this firmware without a spa you need something that emulates the
+**controller side of the RS-485 bus**: Ready polling round-robin, the new-client
+channel handshake (`FE BF 00/01/02/03`), and periodic Status broadcasts. Nothing
+off-the-shelf does this; `../spa-serial-tester/protocol.js` has the verified
+codec to build one on.
+
+Once such a simulator exists, wire the RS-485 A+/B- to its dongle, flash
+`balboa-spa.yaml` with `read_only: false`, and confirm in the ESPHome logs:
 - a "Detected spa" line with model + accessory inventory,
 - decoded status (temperature, pump, light),
 - command round-trips when you toggle entities.

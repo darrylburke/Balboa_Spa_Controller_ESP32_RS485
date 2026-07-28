@@ -37,6 +37,12 @@ class ProtocolEngine {
   uint8_t config_attempts() const { return config_attempts_; }
   bool gave_up_on_config() const { return config_attempts_ >= CONFIG_MAX_ATTEMPTS; }
 
+  // Bring-up diagnostics. Distinguishing "no bytes at all" from "bytes that never
+  // decode" is the difference between a wiring fault and swapped A/B — without
+  // these counters both look identical from the outside.
+  uint32_t frames_decoded() const { return frames_decoded_; }
+  uint32_t noise_bytes() const { return noise_bytes_; }
+
   void feed(const uint8_t *data, size_t len);
 
   const SpaStatus &status() const { return status_; }
@@ -103,6 +109,8 @@ class ProtocolEngine {
   uint8_t config_attempts_ = 0;
   uint16_t statuses_since_config_req_ = 0;
   uint16_t statuses_since_our_window_ = 0;
+  uint32_t frames_decoded_ = 0;
+  uint32_t noise_bytes_ = 0;
 
   SpaStatus status_;
   SpaConfig config_;
