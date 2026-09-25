@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome import pins
 from esphome.components import uart, time
 from esphome.const import CONF_ID
 from esphome.core.config import include_file
@@ -18,6 +19,7 @@ CONF_BALBOA_SPA_ID = "balboa_spa_id"
 CONF_READ_ONLY = "read_only"
 CONF_UART_SELFTEST = "uart_selftest"
 CONF_TIME_ID = "time_id"
+CONF_DIRECTION_PIN = "direction_pin"
 
 CONFIG_SCHEMA = (
     cv.Schema(
@@ -28,6 +30,9 @@ CONFIG_SCHEMA = (
             # DISCONNECT the RS-485 module first and jumper TX->RX directly.
             cv.Optional(CONF_UART_SELFTEST, default=False): cv.boolean,
             cv.Optional(CONF_TIME_ID): cv.use_id(time.RealTimeClock),
+            # MAX485-style breakout with DE and /RE tied together: LOW listens,
+            # HIGH drives the bus. Omit for an auto-direction module.
+            cv.Optional(CONF_DIRECTION_PIN): pins.gpio_output_pin_schema,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -56,3 +61,6 @@ async def to_code(config):
     if CONF_TIME_ID in config:
         rtc = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time(rtc))
+    if CONF_DIRECTION_PIN in config:
+        direction_pin = await cg.gpio_pin_expression(config[CONF_DIRECTION_PIN])
+        cg.add(var.set_direction_pin(direction_pin))

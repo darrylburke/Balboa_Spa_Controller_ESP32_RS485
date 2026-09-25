@@ -1,5 +1,6 @@
 #pragma once
 #include "esphome/core/component.h"
+#include "esphome/core/gpio.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/uart/uart.h"
@@ -24,6 +25,8 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   // DISCONNECT the module and jumper TX->RX before enabling: with the module
   // attached this would put bytes on a shared spa bus outside our Ready window.
   void set_uart_selftest(bool on) { uart_selftest_ = on; }
+  // DE+/RE of a MAX485-style module. Held LOW (receive) except while writing.
+  void set_direction_pin(GPIOPin *pin) { direction_pin_ = pin; }
 #ifdef USE_TIME
   void set_time(time::RealTimeClock *rtc) { time_ = rtc; }
 #endif
@@ -44,6 +47,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 
  protected:
   void maybe_sync_time_();
+  void bus_write_(const uint8_t *d, size_t n);
 
   ProtocolEngine engine_;
   CallbackManager<void()> status_cb_;
@@ -52,6 +56,10 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   // The spa broadcasts Status ~1/s; treat a long gap as the bus being down.
   static constexpr uint32_t BUS_TIMEOUT_MS = 15000;
   uint32_t last_status_ms_{0};
+  // Entities are re-notified only when Status changes, or this often regardless.
+  static constexpr uint32_t STATUS_REFRESH_MS = 60000;
+  SpaStatus last_published_status_{};
+  uint32_t last_status_publish_ms_{0};
   bool bus_connected_{false};
   // A healthy Balboa bus is ~1000 B/s; a floating rx pin yields tens of B/s of
   // EMI noise. Anything under this is not real traffic.
@@ -60,6 +68,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   uint32_t last_rx_bytes_{0};
   uint32_t last_diag_ms_{0};
   bool uart_selftest_{false};
+  GPIOPin *direction_pin_{nullptr};
   uint32_t last_selftest_ms_{0};
   uint32_t selftest_sent_{0};
 #ifdef USE_TIME

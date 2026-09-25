@@ -8,8 +8,14 @@ namespace balboa_spa {
 static const char *const TAG = "balboa_spa";
 
 void BalboaSpa::setup() {
+  if (direction_pin_ != nullptr) {
+    // Receive by default. Left floating, a MAX485's DE/RE can enable its driver
+    // and hold the shared bus, and the receiver never passes anything to RX.
+    direction_pin_->setup();
+    direction_pin_->digital_write(false);
+  }
   engine_.set_read_only(read_only_);
-  engine_.set_write_fn([this](const uint8_t *d, size_t n) { this->write_array(d, n); });
+  engine_.set_write_fn([this](const uint8_t *d, size_t n) { this->bus_write_(d, n); });
 
   // Reuse the channel the controller gave us previously. The spa polls an
   // assigned channel forever, so resuming it avoids leaking a new one on every
@@ -41,7 +47,18 @@ void BalboaSpa::setup() {
       ESP_LOGI(TAG, "RS-485 bus connected (Status received)");
       this->bus_cb_.call();
     }
-    this->status_cb_.call();
+    // The spa repeats Status several times a second. Sensors, climate, fan and
+    // select publish on every call, so fanning out each one flooded MQTT (12k
+    // dropped messages/10s) and kept knocking the broker link over. Notify
+    // entities only on change, plus a periodic refresh.
+    const SpaStatus &st = this->engine_.status();
+    uint32_t now = millis();
+    if (std::memcmp(&st, &this->last_published_status_, sizeof(SpaStatus)) != 0 ||
+        (now - this->last_status_publish_ms_) > STATUS_REFRESH_MS) {
+      std::memcpy(&this->last_published_status_, &st, sizeof(SpaStatus));
+      this->last_status_publish_ms_ = now;
+      this->status_cb_.call();
+    }
     this->maybe_sync_time_();
   };
   engine_.on_config_update = [this]() {
@@ -95,8 +112,7 @@ void BalboaSpa::loop() {
     // be mistaken for our echo.
     while (this->available()) { uint8_t d; this->read_byte(&d); }
 
-    this->write_array(pattern, sizeof(pattern));
-    this->flush();
+    this->bus_write_(pattern, sizeof(pattern));
     delay(20);   // 8 bytes @115200 is ~0.7ms; allow ample margin
 
     // Compare CONTENT, not just a count. Checking "did any bytes arrive" is
@@ -157,6 +173,19 @@ void BalboaSpa::loop() {
   }
 }
 
+void BalboaSpa::bus_write_(const uint8_t *d, size_t n) {
+  if (direction_pin_ != nullptr) {
+    direction_pin_->digital_write(true);
+    delayMicroseconds(10);   // MAX485 driver enable is well under 1 us
+  }
+  this->write_array(d, n);
+  // flush() waits for the last stop bit to leave the shifter, so the driver is
+  // never released mid-byte.
+  this->flush();
+  if (direction_pin_ != nullptr)
+    direction_pin_->digital_write(false);
+}
+
 void BalboaSpa::maybe_sync_time_() {
 #ifdef USE_TIME
   if (time_ == nullptr || read_only_) return;
@@ -180,6 +209,7 @@ void BalboaSpa::maybe_sync_time_() {
 void BalboaSpa::dump_config() {
   ESP_LOGCONFIG(TAG, "Balboa Spa:");
   ESP_LOGCONFIG(TAG, "  read_only: %s", read_only_ ? "YES" : "NO");
+  LOG_PIN("  Direction pin: ", direction_pin_);
   if (engine_.registered())
     ESP_LOGCONFIG(TAG, "  bus channel: 0x%02X", engine_.channel());
   else
