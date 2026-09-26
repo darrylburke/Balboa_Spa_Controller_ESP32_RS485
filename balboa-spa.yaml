@@ -15,20 +15,15 @@ esp32:
     type: esp-idf
 
 wifi:
-  # 2.4 GHz only (ESP32-C3 has no 5 GHz radio). Highest priority wins when
-  # both are visible; the device stays put until it drops, then re-evaluates.
-  # BG25OUTDOOR failover suspended during bring-up (its retry/hidden-SSID
-  # phases kept interrupting BG52). Restore once the RS-485 side is working:
-  #   - ssid: !secret wifi_ssid_outdoor
-  #     password: !secret wifi_password_outdoor
-  #     priority: 10
+  # 2.4 GHz only (ESP32-C3 has no 5 GHz radio).
+  # Single network: the outdoor AP by the spa (wifi_ssid is no longer used).
   # This C3 board cannot hold WiFi at full TX power (20 dB): the AP never hears
   # it ('Auth Expired' at full RSSI). Verified on the spa 2026-09-25 — raising it
   # took the device offline until reflashed over USB.
   output_power: 8.5dB
   networks:
-    - ssid: !secret wifi_ssid
-      password: !secret wifi_password
+    - ssid: !secret wifi_ssid_outdoor
+      password: !secret wifi_password_outdoor
   ap:
     ssid: "Balboa-Spa Fallback"
     password: !secret ap_password
