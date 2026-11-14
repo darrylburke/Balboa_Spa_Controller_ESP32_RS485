@@ -7,7 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node mqtt-tester.js"
+    "start": "node mqtt-tester.js",
+    "test": "node --test"
   },
   "dependencies": {
     "mqtt": "^5.10.0"

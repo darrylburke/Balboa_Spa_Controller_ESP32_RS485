@@ -21,6 +21,7 @@ interval:
             root["read_only"] = id(spa).read_only();
             root["uart_selftest"] = id(spa).uart_selftest();
             root["registered"] = e.registered();
+            root["registration_only"] = e.registration_only();
             root["channel"] = e.channel();
             root["status_valid"] = e.status().valid;
             root["config_valid"] = e.config().valid;

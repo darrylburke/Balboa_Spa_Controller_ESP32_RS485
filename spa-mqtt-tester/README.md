@@ -43,7 +43,7 @@ verified against the state echo.
   disconnected gateway leaves a complete-looking set of values on the broker. The
   status line says `⚠ spa OFFLINE — values below are retained/stale` rather than
   showing them as current.
-- **Verifies commands against the echo**, printing `✓ confirmed` or `✗ no
+- **Verifies commands against the echo**, printing `matching state observed` or `✗ no
   confirming state`, instead of assuming a publish took effect.
 - **Publishes commands with `retain: false`.** A retained command would be
   redelivered every time the gateway reconnects and would move real equipment
@@ -68,3 +68,11 @@ yields no data.
 
 All temperatures on the wire are Celsius (`unit_of_meas: °C` in discovery), and
 every entity carries `avty_t: {prefix}/status`.
+
+
+Offline corrections: Jets planning now emits one desired command per action;
+matching-state checks exclude retained, unrelated and expired messages. Disconnects
+clear pending verification and cached state. These observations are not proof of a
+physical effect, ownership or controller acceptance. The default Jets cycle still
+assumes the configured two-speed profile; do not use it to discover this controller.
+Run `node --test` for pure tests; starting `mqtt-tester.js` connects to a real broker.

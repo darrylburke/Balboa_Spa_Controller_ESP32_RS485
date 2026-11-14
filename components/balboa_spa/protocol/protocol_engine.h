@@ -41,6 +41,16 @@ class ProtocolEngine {
     write_fn_ = nullptr;
     checked_write_fn_ = std::move(fn);
   }
+  void set_registration_only(bool enabled) {
+    if (enabled && q_count_) {
+      events_.record(EventKind::QUEUE_CLEARED, channel_, 0, q_count_, uint32_t(RejectReason::REGISTRATION_ONLY));
+      q_head_ = q_tail_ = q_count_ = 0;
+    }
+    registration_only_ = enabled;
+  }
+  bool registration_only() const { return registration_only_; }
+  // Local command freshness policy, not a Balboa response timing rule.
+  void set_command_ttl_ms(uint32_t ttl) { command_ttl_ms_ = ttl; }
   EventRecorder &events() { return events_; }
   TxCause tx_cause() const { return tx_cause_; }
   uint32_t tx_ref() const { return tx_ref_; }
@@ -115,6 +125,7 @@ class ProtocolEngine {
   bool pop_and_send_();
   bool send_now_(const uint8_t *frame, size_t len, TxCause cause = TxCause::IDLE, uint32_t ref = 0);   // bypasses the queue (handshake frames)
   void invalidate_ownership_(RejectReason cause = RejectReason::UNOWNED);
+  void cancel_item_(uint8_t item);
   bool has_writer_() const { return bool(write_fn_) || bool(checked_write_fn_); }
   void request_channel_();
   void adopt_channel_(uint8_t id);
@@ -145,9 +156,12 @@ class ProtocolEngine {
   uint32_t tx_ref_ = 0, registration_ref_ = 0;
   bool trace_write_ = true;
   uint32_t queue_ref_[Q_SLOTS] = {};
+  uint64_t queue_at_ms_[Q_SLOTS] = {};
+  uint32_t command_ttl_ms_ = 5000;
   CheckedWriteFn checked_write_fn_;
   WriteFn write_fn_;
   bool read_only_ = false;
+  bool registration_only_ = false;
   bool registered_ = false;
   bool registration_pending_ = false;
   // A saved address is observable, but is not authorization to transmit.

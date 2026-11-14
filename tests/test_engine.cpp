@@ -779,3 +779,129 @@ TEST(engine_event_provenance_distinguishes_assignment_ack_and_acceptance) {
   CHECK(request > 0); CHECK(ack > request); CHECK(accepted > ack);
   CHECK_EQ(candidates, 2); CHECK_EQ(rejected, 1);
 }
+
+TEST(engine_queued_frames_expire_without_replaying_toggles) {
+  ProtocolEngine e;
+  EventTime clock{100, 0}; e.events().set_clock([&]() { return clock; });
+  register_engine(e);
+  feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  e.toggle_item(item::LIGHT1);
+  clock.uptime_ms += 5001;
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+  e.toggle_item(item::LIGHT1);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.back()[4], 0x11);
+}
+
+TEST(engine_observed_panel_toggle_cancels_pending_same_item_only) {
+  ProtocolEngine e;
+  register_engine(e);
+  feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  e.toggle_item(item::LIGHT1);
+  e.toggle_item(item::PUMP1);
+  uint8_t panel[16]; size_t n = encode_toggle_item(panel, item::LIGHT1, 0x10);
+  e.feed(panel, n);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1);
+  CHECK_EQ(sink.writes.back()[5], item::PUMP1);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+}
+
+// Unit-level state fixtures test the implemented arithmetic, not the BP200G1's
+// unmeasured physical cycle or capability encoding.
+struct CommandStateEngine : ProtocolEngine {
+  void pump_observation(uint8_t speed, uint8_t levels) {
+    status_.valid = true; status_.pumps[0] = speed;
+    config_.valid = true; config_.pumps[0] = levels;
+  }
+};
+TEST(engine_desired_pump_state_uses_bounded_modulo_without_retries) {
+  for (uint8_t levels : {1, 2}) {
+    for (uint8_t current = 0; current <= levels; current++) {
+      for (uint8_t desired = 0; desired <= levels; desired++) {
+        CommandStateEngine e; register_engine(e); feed_hex(e, STATUS_FRAME);
+        for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+        e.pump_observation(current, levels);
+        Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+        e.set_pump(0, desired);
+        unsigned toggles = (desired + levels + 1 - current) % (levels + 1);
+        for (unsigned i = 0; i < toggles + 1; i++) feed_hex(e, READY_OURS);
+        unsigned actual = 0;
+        for (const auto &frame : sink.writes) if (frame[4] == 0x11) actual++;
+        CHECK_EQ(actual, toggles);
+        CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+      }
+    }
+  }
+}
+
+TEST(engine_queue_expiry_keeps_fresh_requests_and_no_automatic_reassertion) {
+  ProtocolEngine e;
+  EventTime clock{0, 0}; e.events().set_clock([&]() { return clock; });
+  register_engine(e); feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  e.toggle_item(item::LIGHT1);
+  clock.uptime_ms = 4000; e.toggle_item(item::PUMP1);
+  clock.uptime_ms = 5000; feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1);
+  CHECK_EQ(sink.writes.back()[5], item::PUMP1);
+  clock.uptime_ms = 15000; feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+}
+
+TEST(engine_registration_only_allows_handshake_and_idle_but_no_controls_or_config) {
+  ProtocolEngine e; e.set_registration_only(true);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  feed_hex(e, CTS); assign_channel(e, 0x11);
+  CHECK(e.registered());
+  for (int i = 0; i < 5; i++) {
+    feed_hex(e, STATUS_FRAME);
+    e.toggle_item(item::LIGHT1); e.set_target_temperature_raw(90);
+    e.request_missing_config();
+    feed_hex(e, READY_OURS);
+  }
+  CHECK_EQ(sink.writes.size(), 7);
+  CHECK_EQ(sink.writes[0][4], msg::ID_REQ1);
+  CHECK_EQ(sink.writes[1][4], msg::ID_ACK1);
+  for (size_t i = 2; i < sink.writes.size(); i++) CHECK_EQ(sink.writes[i][4], msg::NOTHING1);
+}
+
+TEST(engine_filter_request_is_not_reported_as_observed_state_before_response) {
+  ProtocolEngine e; register_engine(e);
+  feed_hex(e, "7e 0d 0a bf 23 08 00 02 00 94 00 01 1e d0 7e");
+  FilterCyclesData desired = e.filter_cycles();
+  CHECK_EQ(desired.c1_duration_min, 120);
+  desired.c1_duration_min = 180;
+  e.update_filter_cycles(desired);
+  CHECK_EQ(e.filter_cycles().c1_duration_min, 120);
+}
+
+TEST(engine_known_command_payload_shapes_are_checked_before_queueing) {
+  ProtocolEngine e; register_engine(e); feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  uint8_t frame[16]; const uint8_t short_toggle[] = {item::LIGHT1};
+  size_t n = build_frame(frame, e.channel(), 0xbf, 0x11, short_toggle, 1);
+  e.enqueue_frame(frame, n);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+}
+
+TEST(engine_already_registered_assignment_is_observed_and_explicitly_rejected) {
+  ProtocolEngine e; e.events().set_enabled(true);
+  register_engine(e); assign_channel(e, 0x12);
+  BusEvent event; bool rejected = false;
+  while (e.events().pop(event))
+    if (event.kind == EventKind::REJECTED && event.detail == uint32_t(RejectReason::ALREADY_REGISTERED))
+      rejected = true;
+  CHECK(rejected); CHECK(e.registered()); CHECK_EQ(e.channel(), 0x11);
+}

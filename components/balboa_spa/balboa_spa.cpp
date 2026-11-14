@@ -186,6 +186,10 @@ bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
     engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::PASSIVE));
     return false;
   }
+  if (selftest && engine_.registration_only()) {
+    engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::REGISTRATION_ONLY));
+    return false;
+  }
   if (uart_component_ != nullptr && uart_component_->is_failed()) {
     engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::TRANSPORT));
     return false;
@@ -220,7 +224,7 @@ bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
 
 void BalboaSpa::maybe_sync_time_() {
 #ifdef USE_TIME
-  if (time_ == nullptr || read_only_) return;
+  if (time_ == nullptr || read_only_ || engine_.registration_only()) return;
   auto now = time_->now();
   if (!now.is_valid()) return;
   uint32_t ms = millis();

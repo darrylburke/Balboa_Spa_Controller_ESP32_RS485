@@ -33,6 +33,8 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 #endif
 
   // UART writes completed by this component, including the optional self-test.
+  void set_registration_only(bool enabled) { engine_.set_registration_only(enabled); }
+  void set_command_ttl_ms(uint32_t ttl) { engine_.set_command_ttl_ms(ttl); }
   void set_diagnostic_events(bool enabled) { engine_.events().set_enabled(enabled); }
   uint32_t diagnostic_boot_id() const { return diagnostic_boot_id_; }
   bool read_only() const { return read_only_; }

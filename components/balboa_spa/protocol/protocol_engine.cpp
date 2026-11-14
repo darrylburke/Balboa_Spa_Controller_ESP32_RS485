@@ -6,7 +6,25 @@
 namespace esphome {
 namespace balboa_spa {
 
+// Shapes of command encodings already implemented below; no new item semantics.
+static bool valid_queued_payload(const ParsedFrame &f) {
+  switch (f.type1) {
+    case 0x04: return f.payload_len == 0;
+    case 0x11: return f.payload_len == 2 && f.payload[1] == 0;
+    case 0x20: return f.payload_len == 1;
+    case 0x21: return f.payload_len == 2;
+    case 0x22: return f.payload_len == 3;
+    case 0x23: return f.payload_len == 8;
+    case 0x27: return f.payload_len == 2;
+    default: return true;  // retain compatibility for other non-flow-control frames
+  }
+}
+
 void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
+  if (registration_only_) {
+    events_.record(EventKind::REJECTED, channel_, 0, uint32_t(RejectReason::REGISTRATION_ONLY));
+    return;
+  }
   if (read_only_ || !registered()) {
     events_.record(EventKind::REJECTED, channel_, 0, uint32_t(read_only_ ? RejectReason::PASSIVE : RejectReason::UNOWNED));
     return;
@@ -21,17 +39,40 @@ void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
   size_t consumed = 0;
   if (scan_frame(frame, len, &parsed, &consumed) != ScanResult::FRAME ||
       consumed != len || size_t(parsed.payload_len) + 7 != len ||
-      parsed.src != channel_ || parsed.type0 != 0xbf ||
+      parsed.src != channel_ || parsed.type0 != 0xbf || !valid_queued_payload(parsed) ||
       (parsed.type1 <= 0x07 && parsed.type1 != 0x04)) {
     events_.record(EventKind::REJECTED, channel_, 0, uint32_t(RejectReason::INVALID_FRAME));
     return;
   }
+  queue_at_ms_[q_tail_] = events_.now().uptime_ms;
   queue_ref_[q_tail_] = events_.record(EventKind::QUEUED, channel_,
       (uint16_t(parsed.type0) << 8) | parsed.type1, len);
   std::memcpy(queue_[q_tail_], frame, len);
   queue_len_[q_tail_] = (uint8_t) len;
   q_tail_ = (q_tail_ + 1) % Q_SLOTS;
   q_count_++;
+}
+
+void ProtocolEngine::cancel_item_(uint8_t item) {
+  size_t kept = 0;
+  for (size_t i = 0; i < q_count_; i++) {
+    size_t src = (q_head_ + i) % Q_SLOTS;
+    if (queue_len_[src] == 9 && queue_[src][3] == 0xbf &&
+        queue_[src][4] == 0x11 && queue_[src][5] == item) {
+      events_.record(EventKind::QUEUE_RETIRED, channel_, 0xbf11,
+          uint32_t(RejectReason::CONFLICT), queue_ref_[src]);
+      continue;
+    }
+    size_t dst = (q_head_ + kept++) % Q_SLOTS;
+    if (dst != src) {
+      std::memcpy(queue_[dst], queue_[src], queue_len_[src]);
+      queue_len_[dst] = queue_len_[src];
+      queue_ref_[dst] = queue_ref_[src];
+      queue_at_ms_[dst] = queue_at_ms_[src];
+    }
+  }
+  q_count_ = kept;
+  q_tail_ = (q_head_ + kept) % Q_SLOTS;
 }
 
 void ProtocolEngine::toggle_item(uint8_t item_code) {
@@ -111,7 +152,7 @@ void ProtocolEngine::adopt_channel_(uint8_t id) {
 // Ask for whatever config we are still missing, paced by Status broadcasts and
 // bounded so a permanently-unanswered request cannot spam the bus forever.
 void ProtocolEngine::maybe_request_config_() {
-  if (read_only_ || !registered()) return;
+  if (read_only_ || !registered() || registration_only_) return;
   if (have_full_config()) { config_attempts_ = 0; statuses_since_config_req_ = 0; return; }
   if (q_count_ != 0) return;                       // wait for the queue to drain
   statuses_since_config_req_++;
@@ -123,6 +164,12 @@ void ProtocolEngine::maybe_request_config_() {
 }
 
 bool ProtocolEngine::pop_and_send_() {
+  const uint64_t now = q_count_ ? events_.now().uptime_ms : 0;
+  while (q_count_ && now - queue_at_ms_[q_head_] >= command_ttl_ms_) {
+    events_.record(EventKind::QUEUE_EXPIRED, channel_, 0, command_ttl_ms_, queue_ref_[q_head_]);
+    q_head_ = (q_head_ + 1) % Q_SLOTS;
+    q_count_--;
+  }
   if (q_count_ == 0) return false;
   if (read_only_ || !registered() || !seen_status_ || !has_writer_()) return false;
   uint32_t ref = queue_ref_[q_head_];
@@ -258,7 +305,7 @@ void ProtocolEngine::update_filter_cycles(const FilterCyclesData &fc) {
   uint8_t f[Q_FRAME_CAP + 8];
   size_t n = encode_filter_cycles(f, fc, channel_);
   enqueue_frame(f, n);
-  filter_ = fc;
+  // Keep observed state until a controller response arrives.
 }
 
 void ProtocolEngine::process_frame(const ParsedFrame &f) {
@@ -310,6 +357,15 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
     if (on_config_update) on_config_update();
     return;
   }
+  // Yield unsent same-item toggles to an observed other-client action. No
+  // automatic reassertion: the physical panel has priority. Missed frames cannot
+  // be inferred from status alone, and are a commissioning limitation.
+  if (f.src != channel_ && f.src >= channel::MIN && f.src <= channel::MAX &&
+      frame_is(f, 0xbf, 0x11) && f.payload_len == 2) {
+    events_.record(EventKind::OTHER_TOGGLE, f.src, 0xbf11, f.payload[0]);
+    cancel_item_(f.payload[0]);
+  }
+
   // A different observed join request makes the outstanding exchange ambiguous.
   // Fail closed until the next existing NEW_CLIENT_CTS; add no backoff or delay.
   // Do not confuse an echo of our unchanged request with another client.
