@@ -692,3 +692,38 @@ TEST(engine_reassignment_of_owned_channel_revokes_authority_and_queue) {
   CHECK_EQ(sink.writes.size(), 3);
   CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
 }
+
+TEST(engine_public_queue_cannot_impersonate_registration_or_flow_control) {
+  ProtocolEngine e;
+  register_engine(e);
+  feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  Sink sink;
+  e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  uint8_t frame[16];
+  for (uint8_t type : {0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x07}) {
+    size_t n = build_frame(frame, e.channel(), 0xbf, type, nullptr, 0);
+    e.enqueue_frame(frame, n);
+  }
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+}
+
+TEST(engine_transport_removal_revokes_queue_and_authority) {
+  ProtocolEngine e;
+  register_engine(e);
+  feed_hex(e, STATUS_FRAME);
+  e.toggle_item(item::LIGHT1);
+  e.set_write_fn(nullptr);
+  CHECK(!e.registered());
+  Sink sink;
+  e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 0);
+  feed_hex(e, CTS);
+  assign_channel(e, 0x11);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 3);
+  CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+}

@@ -15,7 +15,8 @@ void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
   size_t consumed = 0;
   if (scan_frame(frame, len, &parsed, &consumed) != ScanResult::FRAME ||
       consumed != len || size_t(parsed.payload_len) + 7 != len ||
-      parsed.src != channel_) return;
+      parsed.src != channel_ || parsed.type0 != 0xbf ||
+      (parsed.type1 <= 0x07 && parsed.type1 != 0x04)) return;
   std::memcpy(queue_[q_tail_], frame, len);
   queue_len_[q_tail_] = (uint8_t) len;
   q_tail_ = (q_tail_ + 1) % Q_SLOTS;

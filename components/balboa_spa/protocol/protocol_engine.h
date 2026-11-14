@@ -28,6 +28,7 @@ class ProtocolEngine {
   using WriteFn = std::function<void(const uint8_t *, size_t)>;
 
   void set_write_fn(WriteFn fn) {
+    if (!fn) invalidate_ownership_();
     registration_pending_ = false;
     write_fn_ = std::move(fn);
   }
