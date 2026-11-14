@@ -48,8 +48,8 @@ does not solve channel exhaustion by silently reusing an unverified address.
   existing nothing-to-send response. Other channels receive no response.
 - Required handshake writes are the exceptions to poll-only transmission:
   ID_REQUEST follows NEW_CLIENT_CTS, ID_ACK follows a correlated assignment.
-- Queue retirement still means the void write callback returned, not controller
-  acceptance. Command retries and UART completion semantics are unchanged.
+- Queue retirement means a successful checked callback (or legacy void callback
+  return), not controller acceptance. Command retries and UART completion semantics are unchanged.
 
 The diagnostic JSON schema and receive counters are unchanged. `channel` can be a
 restored, unowned address and `ready_ours` still means an address match, not proof of
@@ -57,7 +57,8 @@ ownership. Passive mode must show zero `channel_adoptions` and zero TX. Saved
 addresses are loaded and logged without granting ownership or rewriting storage.
 
 Keep the local device at `read_only: true`, `uart_selftest: false`. The optional
-UART self-test remains a direct UART-write bypass and must stay disabled. Passing
+UART self-test must stay disabled; the final UART guard now blocks it in read-only
+mode as well. Passing
 host tests and compilation does not authorize flashing or active operation.
 
 

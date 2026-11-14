@@ -70,7 +70,7 @@ and convert, or let Home Assistant do it via `device_class: temperature`.
 ## Notes
 - Cycle-2 filter is auto-enabled when its duration > 0 (no separate enable entity).
 - `read_only: true` suppresses protocol writes. Keep `uart_selftest: false` too;
-  the optional UART loopback test bypasses the protocol write guard.
+  the final UART guard also blocks self-test writes in read-only mode.
 - Heating mode is a sparse encoding — Ready-in-Rest is **3**, not 2.
 - Requires a recent ESPHome (uses `climate_schema()`); see `docs/bring-up.md`.
 
@@ -128,3 +128,13 @@ the payload stays below 2 KiB. Publication runs once per 30 seconds, with a fixe
 only increments fixed-size counters; UART counters update after flush and driver
 release. Diagnostics add no delays or protocol decisions; instrumentation and JSON
 serialization still have a small CPU cost. Ownership rules are described above.
+
+
+## Offline commissioning readiness
+
+See [readiness and patch checklist](docs/offline-readiness.md),
+[bounded event provenance](docs/rs485-provenance.md),
+[command lifecycle findings](docs/command-lifecycle.md), and
+[the staged commissioning/rollback procedure](docs/bp200g1-commissioning.md).
+The optional versioned event package preserves the original diagnostic topic.
+No offline test result establishes physical coexistence or authorizes transmission.

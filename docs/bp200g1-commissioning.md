@@ -31,8 +31,9 @@ ESPHOME_BUILD_PATH=/tmp/balboa-bp200g1-build esphome compile balboa-passive.yaml
 These commands do not flash. The device configuration must remain `read_only: true`
 and `uart_selftest: false`. RX=GPIO18, TX=GPIO17, EN=GPIO21, 115200 baud remain unchanged.
 Review artifacts and commit identity are recorded locally in
-`.esphome/coexistence-review/`; firmware output is under
-`/tmp/balboa-bp200g1-build/waveshare-balboa/build/`. Preserve needed /tmp artifacts
+`.esphome/offline-review/`; provenance candidate output is under
+`/tmp/balboa-offline-events/waveshare-balboa/build/`, and the unchanged-config
+build uses `/tmp/balboa-offline-production/waveshare-balboa/build/`. Preserve needed /tmp artifacts
 before clearing temporary files. Do not overwrite the rollback directory.
 
 ## 1. Passive candidate validation (future, separately approved)
@@ -59,13 +60,30 @@ observation method, rollback transport/address, and operator availability. Do no
 change wiring or install a bus analyzer without approval. Existing MQTT snapshots
 are insufficient for the required timestamped per-frame evidence. Arrange an
 approved receive-only capture method that can distinguish gateway TX from RX;
-otherwise this stage cannot pass. This patch adds no per-frame MQTT stream.
+otherwise this stage cannot pass. The optional [provenance v1](rs485-provenance.md)
+provides local event sequence/ref, boot, uptime, UTC when valid, and UART outcome.
+Enable it in the separate passive candidate first. Preserve the existing 30-second
+snapshot too. Verify the collector actually persists both topics: repository-only
+inspection did not establish EC2 persistence. See [the integration plan](rs485-collector.md).
+
+Use the local event chain REQUEST -> successful UART/WRITE_RETURN -> matching
+ASSIGNMENT -> successful ACK UART/ACK_RETURN -> ACCEPTED, followed by sampled
+READY and idle UART/WRITE_RETURN with the same poll ref. No critical-overwrite,
+sequence/network gap or unknown local outcome may be hidden in the acceptance
+window. Sample/coalesced counters disclose omitted polls: the events are not a
+lossless physical-bus trace. If this evidence is incomplete or ambiguous, an
+approved independent receive-only capture is needed before progression. Receipt
+UTC cannot replace a null device event timestamp; uptime establishes local order.
 
 An approved active test must use a separate candidate configuration, never edit
 the preserved passive file. No remote control commands are allowed at this gate.
-Active firmware may automatically request missing configuration once registered;
-these are bus transmissions even without a remote command. UART self-test remains
-disabled. Audit other configured automation/time-sync sources before this stage.
+Use `packages/rs485_registration_only.yaml` in that separate candidate and verify
+`registration_only=true` in provenance snapshots. It blocks application commands,
+automatic configuration requests and time-sync writes while retaining the existing
+registration/mandatory idle replies. It never enables active mode itself. The
+current offline provenance wrapper is still read-only; no active candidate has
+been enabled or flashed. UART self-test remains disabled. Audit configured
+application automations and obtain separate approval before any active build/deploy.
 
 The corrected gateway starts unregistered, despite a restored address. It
 **automatically requests registration on each valid NEW_CLIENT_CTS while it remains
@@ -80,7 +98,7 @@ Record monotonic timestamps, direction/source evidence, and channel identifiers 
    existing exchange. Do not expect an invented ACK-of-ACK.
 
 `assignments` only counts received broadcasts; `last_assignment` is observation.
-`channel_adoptions` increments after correlation and the ACK callback returns;
+`channel_adoptions` increments after correlation and a successful checked ACK callback;
 the assignment persistence log has the same limitation. `tx_frames/tx_bytes`
 indicate UART write/flush call returns, not confirmed controller receipt. They do
 not establish exclusive ownership, and may include repeated requests/configuration.
@@ -89,7 +107,9 @@ Do not infer a successful exchange from a nonzero channel or a single counter.
 A distinguishable competing request cancels the pending exchange; the next
 NEW_CLIENT_CTS can retry. Same-hash clients and delayed matching responses remain
 ambiguous. If capture cannot associate this exchange with the gateway rather than
-the TP500, stop. Do not repeatedly reboot to force registration or exhaust channels.
+the TP500, stop. Do not repeatedly reboot to force registration or exhaust channels. For the
+approved test, stop after five valid invitations without a complete registration
+trace; this is an operator test limit, not a new firmware timeout or protocol rule.
 
 ## 3. Coexistence gate (only after registration evidence passes)
 
@@ -114,14 +134,26 @@ missing/late responses, unexplained channel changes, and any TP500 regression.
 Any such result stops progression and triggers the approved rollback plan. Do not
 weaken correlation, hardcode `0x10`, or adjust timing to make this gate appear to pass.
 
-## 4. Control gate (only after coexistence passes and command approval)
+## 4. Light control gate (only after coexistence passes and command approval)
 
-Issue exactly one approved remote command. Record its MQTT topic/payload and time,
+First obtain separate approval for a control-capable candidate with the
+registration-only guard removed, self-test still false, and the same provenance.
+Removing that guard also permits automatic configuration queries and any configured
+time sync; include these in the approval and audit before that deployment.
+Do not edit the preserved passive file. Issue exactly one approved Light command
+using its existing MQTT topic, without a retained command or automatic retry. Record its MQTT topic/payload and time,
 its outbound frame in the next assigned polling opportunity, the physical effect,
 and subsequent reported state. Check TP500 responsiveness again. No automatic
 command retries: toggle requests have no delivery acknowledgement and retrying may
 reverse a successful effect. A callback return or increased TX counter is not proof
 that the spa executed the command.
+
+Only after Light passes, propose separate Jets and heating-mode tests. Capture
+raw capability/status and approved physical panel cycles before choosing single-
+or two-speed assumptions or interpreting READY_IN_REST. [Command limits](command-lifecycle.md)
+apply: no unattended reconciliation or reassertion is implemented. Stop on repeated
+or unexplained commands, unexpected message causes, a queue that outlives its TTL,
+unknown/ambiguous authority, missing UART outcomes, or any TP500 nonresponsiveness.
 
 Do not test ownership-loss/reboot/power-cycle scenarios on the physical spa without
 additional approval. They are covered offline and can consume controller channels.
@@ -143,8 +175,19 @@ the previously confirmed gateway address, and upload the saved image explicitly:
 esphome upload balboa-passive.yaml --device "$BALBOA_ROLLBACK_DEVICE" --file .esphome/passive-baseline/firmware.ota.bin
 ```
 
-For approved USB recovery use the preserved factory image and the board-specific
-verified recovery procedure; do not assume flash offsets or erase NVS. An OTA
+If OTA is unavailable, do not keep issuing spa commands or repeatedly reboot the
+spa. Use separately approved local USB recovery; select the actual enumerated
+Waveshare serial port and its verified BOOT/reset sequence. After hash verification,
+ESPHome 2026.10.2's serial `--file` path flashes an explicitly supplied factory
+image at the factory-image base (verified in the installed uploader source):
+
+```sh
+# FUTURE APPROVED USB ACTION ONLY; this flashes and reboots the Waveshare:
+esphome upload balboa-passive.yaml --device "$BALBOA_USB_PORT" --file .esphome/passive-baseline/firmware.factory.bin
+```
+
+Do not use the OTA-only image for this factory-image command, guess a serial port,
+or erase NVS. USB/power isolation and recovery are physical actions needing approval. An OTA
 rollback does not reset controller allocations or necessarily restore preference
 contents. After recovery verify both TX counters stay zero, telemetry works, and
 TP500 controls work. Keep the gateway passive; no spa power cycle is implied or
