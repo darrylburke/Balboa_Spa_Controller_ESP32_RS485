@@ -26,7 +26,8 @@ constexpr uint8_t FILTER0 = 0xbf, FILTER1 = 0x23;
 namespace channel {
 constexpr uint8_t UNASSIGNED = 0x00;
 constexpr uint8_t BROADCAST = 0xfe;  // channel the join handshake runs on
-constexpr uint8_t MAX = 0x2f;        // controller assignments are capped here
+constexpr uint8_t MIN = 0x10;        // first dynamically assigned polling channel
+constexpr uint8_t MAX = 0x2f;        // last dynamically assigned polling channel
 }  // namespace channel
 
 // Item codes for toggle commands.
@@ -53,7 +54,7 @@ inline bool is_new_client_cts(const ParsedFrame &f) {
 inline bool is_channel_assignment(const ParsedFrame &f) {
   return f.src == channel::BROADCAST && frame_is(f, msg::ID_ASSIGN0, msg::ID_ASSIGN1);
 }
-// Channel carried by an ID_ASSIGN frame, clamped to the controller's valid range.
+// Channel carried by an ID_ASSIGN frame; invalid/non-polling IDs are rejected.
 uint8_t channel_from_assignment(const ParsedFrame &f);
 
 bool decode_status(const ParsedFrame &f, SpaStatus *out);
@@ -70,6 +71,9 @@ size_t encode_set_temp_scale(uint8_t *out, TempScale scale, uint8_t src);
 size_t encode_config_request(uint8_t *out, uint8_t src);
 size_t encode_control_config_request(uint8_t *out, uint8_t type, uint8_t src);
 
+// Keep the existing request bytes; responses must echo the two hash bytes.
+constexpr uint8_t ID_REQUEST_HASH0 = 0xf1;
+constexpr uint8_t ID_REQUEST_HASH1 = 0x73;
 // Channel negotiation. 0x02 0xf1 0x73 is the client signature used by the
 // reference implementation (cribskip/esp8266_spa).
 size_t encode_id_request(uint8_t *out);

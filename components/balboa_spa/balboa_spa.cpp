@@ -17,15 +17,14 @@ void BalboaSpa::setup() {
   engine_.set_read_only(read_only_);
   engine_.set_write_fn([this](const uint8_t *d, size_t n) { this->bus_write_(d, n); });
 
-  // Reuse the channel the controller gave us previously. The spa polls an
-  // assigned channel forever, so resuming it avoids leaking a new one on every
-  // reboot (an out-of-range or empty value falls through to a fresh handshake).
+  // Load the previous address for diagnostics, never as proof of ownership.
+  // Active operation must register again before responding to any channel poll.
   this->channel_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("balboa_spa_channel"));
   uint8_t saved = 0;
   if (this->channel_pref_.load(&saved)) {
     engine_.restore_channel(saved);
-    if (engine_.registered())
-      ESP_LOGI(TAG, "Resuming saved bus channel 0x%02X", engine_.channel());
+    if (engine_.channel() == saved && saved != channel::UNASSIGNED)
+      ESP_LOGI(TAG, "Saved bus channel 0x%02X (unverified; fresh registration required)", saved);
     else
       ESP_LOGW(TAG, "Saved bus channel 0x%02X is invalid; will negotiate a new one", saved);
   }
@@ -184,6 +183,12 @@ void BalboaSpa::bus_write_(const uint8_t *d, size_t n) {
   this->flush();
   if (direction_pin_ != nullptr)
     direction_pin_->digital_write(false);
+  tx_frames_++;
+  tx_bytes_ += n;
+  if (n >= 5) {
+    last_tx_channel_ = d[2];
+    last_tx_type_ = (uint16_t(d[3]) << 8) | d[4];
+  }
 }
 
 void BalboaSpa::maybe_sync_time_() {
@@ -213,7 +218,7 @@ void BalboaSpa::dump_config() {
   if (engine_.registered())
     ESP_LOGCONFIG(TAG, "  bus channel: 0x%02X", engine_.channel());
   else
-    ESP_LOGCONFIG(TAG, "  bus channel: unassigned (will negotiate)");
+    ESP_LOGCONFIG(TAG, "  bus channel: 0x%02X (unverified; read-only stays silent)", engine_.channel());
   this->check_uart_settings(115200);
 }
 

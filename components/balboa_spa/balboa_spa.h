@@ -31,6 +31,14 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   void set_time(time::RealTimeClock *rtc) { time_ = rtc; }
 #endif
 
+  // UART writes completed by this component, including the optional self-test.
+  bool read_only() const { return read_only_; }
+  bool uart_selftest() const { return uart_selftest_; }
+  uint32_t tx_frames() const { return tx_frames_; }
+  uint32_t tx_bytes() const { return tx_bytes_; }
+  uint8_t last_tx_channel() const { return last_tx_channel_; }
+  uint16_t last_tx_type() const { return last_tx_type_; }
+
   ProtocolEngine &engine() { return engine_; }
   const SpaStatus &status() const { return engine_.status(); }
   const SpaConfig &config() const { return engine_.config(); }
@@ -49,6 +57,10 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   void maybe_sync_time_();
   void bus_write_(const uint8_t *d, size_t n);
 
+  uint32_t tx_frames_{0};
+  uint32_t tx_bytes_{0};
+  uint8_t last_tx_channel_{0};
+  uint16_t last_tx_type_{0};
   ProtocolEngine engine_;
   CallbackManager<void()> status_cb_;
   CallbackManager<void()> config_cb_;
@@ -78,8 +90,8 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   bool discovery_logged_{false};
   uint32_t last_time_sync_{0};
   uint8_t rx_chunk_[128];
-  // Assigned bus channel, persisted across reboots. Without this every restart
-  // negotiates a NEW channel and the controller polls the old one forever.
+  // Last assigned bus channel, persisted for observation only.
+  // A saved value does not authorize transmission after reboot.
   ESPPreferenceObject channel_pref_;
 };
 

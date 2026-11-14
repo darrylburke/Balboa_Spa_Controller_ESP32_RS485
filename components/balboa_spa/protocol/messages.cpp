@@ -110,7 +110,7 @@ bool decode_filter_cycles(const ParsedFrame &f, FilterCyclesData *out) {
 uint8_t channel_from_assignment(const ParsedFrame &f) {
   if (f.payload_len < 1) return channel::UNASSIGNED;
   uint8_t id = f.payload[0];
-  return id > channel::MAX ? channel::MAX : id;
+  return id < channel::MIN || id > channel::MAX ? channel::UNASSIGNED : id;
 }
 
 size_t encode_filter_cycles(uint8_t *out, const FilterCyclesData &fc, uint8_t src) {
@@ -152,7 +152,7 @@ size_t encode_config_request(uint8_t *out, uint8_t src) {
 }
 
 size_t encode_id_request(uint8_t *out) {
-  uint8_t p[3] = {0x02, 0xf1, 0x73};
+  uint8_t p[3] = {0x02, ID_REQUEST_HASH0, ID_REQUEST_HASH1};
   return build_frame(out, channel::BROADCAST, msg::ID_REQ0, msg::ID_REQ1, p, 3);
 }
 

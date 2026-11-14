@@ -1,0 +1,41 @@
+# Requires balboa_spa id: spa and MQTT. Does not enable bus transmission.
+interval:
+  - interval: 30s
+    then:
+      - mqtt.publish_json:
+          topic: balboa/waveshare/diagnostics/rs485
+          retain: false
+          payload: |-
+            const auto &e = id(spa).engine();
+            const auto &d = e.diagnostics();
+            root["schema_version"] = 1;
+            root["read_only"] = id(spa).read_only();
+            root["uart_selftest"] = id(spa).uart_selftest();
+            root["rx_frames"] = e.frames_decoded();
+            root["uptime_s"] = millis() / 1000;
+            root["channel"] = e.channel();
+            root["new_client_cts"] = d.new_client_cts;
+            root["assignments"] = d.assignments;
+            root["last_assignment"] = d.last_assignment;
+            root["channel_adoptions"] = d.channel_adoptions;
+            root["channel_restores"] = d.channel_restores;
+            root["channel_stale"] = d.channel_stale;
+            root["ready"] = d.ready;
+            root["ready_ours"] = d.ready_ours;
+            root["last_ready_channel"] = d.last_ready_channel;
+            auto polls = root["ready_by_channel"].to<JsonObject>();
+            for (unsigned ch = 0; ch <= esphome::balboa_spa::channel::MAX; ch++) {
+              if (d.ready_by_channel[ch] == 0) continue;
+              char key[3];
+              snprintf(key, sizeof(key), "%02X", ch);
+              polls[key] = d.ready_by_channel[ch];
+            }
+            root["tx_frames"] = id(spa).tx_frames();
+            root["tx_bytes"] = id(spa).tx_bytes();
+            if (id(spa).tx_frames() != 0 || id(spa).tx_bytes() != 0) {
+              root["last_tx_channel"] = id(spa).last_tx_channel();
+              root["last_tx_type"] = id(spa).last_tx_type();
+            } else {
+              root["last_tx_channel"] = nullptr;
+              root["last_tx_type"] = nullptr;
+            }

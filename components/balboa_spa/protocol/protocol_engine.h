@@ -9,23 +9,45 @@
 namespace esphome {
 namespace balboa_spa {
 
+// Observations only: these never participate in protocol decisions.
+struct BusDiagnostics {
+  uint32_t new_client_cts = 0;
+  uint32_t assignments = 0;
+  uint8_t last_assignment = 0;  // raw payload, before existing channel clamping
+  uint32_t channel_adoptions = 0;
+  uint32_t channel_restores = 0;
+  uint32_t channel_stale = 0;
+  uint32_t ready = 0;
+  uint32_t ready_ours = 0;
+  uint8_t last_ready_channel = 0;
+  uint32_t ready_by_channel[channel::MAX + 1] = {};
+};
+
 class ProtocolEngine {
  public:
   using WriteFn = std::function<void(const uint8_t *, size_t)>;
 
-  void set_write_fn(WriteFn fn) { write_fn_ = std::move(fn); }
-  void set_read_only(bool ro) { read_only_ = ro; }
-  // Resume a channel the controller assigned to us in an earlier session (e.g.
-  // reloaded from NVS after a reboot). The controller keeps polling a channel
-  // forever once assigned, so we can answer it directly with no handshake —
-  // verified on hardware. This is what stops every reboot leaking a new channel.
+  void set_write_fn(WriteFn fn) {
+    registration_pending_ = false;
+    write_fn_ = std::move(fn);
+  }
+  void set_read_only(bool ro) {
+    if (ro) invalidate_ownership_();
+    read_only_ = ro;
+  }
+  // Retain the saved address for observation only. A fresh correlated handshake
+  // is required before answering polls; polling alone cannot prove ownership.
   void restore_channel(uint8_t id) {
     if (id == channel::UNASSIGNED || id > channel::MAX) return;
+    invalidate_ownership_();
     channel_ = id;
+    diagnostics_.channel_restores++;
   }
 
+  const BusDiagnostics &diagnostics() const { return diagnostics_; }
+
   uint8_t channel() const { return channel_; }
-  bool registered() const { return channel_ != channel::UNASSIGNED; }
+  bool registered() const { return registered_; }
 
   // Fired once when the controller assigns a channel via the handshake, so the
   // caller can persist it. Not fired on restore_channel().
@@ -76,7 +98,8 @@ class ProtocolEngine {
  protected:
   void process_frame(const ParsedFrame &f);
   bool pop_and_send_();
-  void send_now_(const uint8_t *frame, size_t len);   // bypasses the queue (handshake frames)
+  bool send_now_(const uint8_t *frame, size_t len);   // bypasses the queue (handshake frames)
+  void invalidate_ownership_();
   void request_channel_();
   void adopt_channel_(uint8_t id);
   void maybe_request_config_();
@@ -103,7 +126,9 @@ class ProtocolEngine {
 
   WriteFn write_fn_;
   bool read_only_ = false;
-  // Starts unassigned: we stay silent until the controller gives us a channel.
+  bool registered_ = false;
+  bool registration_pending_ = false;
+  // A saved address is observable, but is not authorization to transmit.
   uint8_t channel_ = channel::UNASSIGNED;
   bool seen_status_ = false;
   uint8_t config_attempts_ = 0;
@@ -112,6 +137,7 @@ class ProtocolEngine {
   uint32_t frames_decoded_ = 0;
   uint32_t noise_bytes_ = 0;
 
+  BusDiagnostics diagnostics_;
   SpaStatus status_;
   SpaConfig config_;
   SpaInfo info_;

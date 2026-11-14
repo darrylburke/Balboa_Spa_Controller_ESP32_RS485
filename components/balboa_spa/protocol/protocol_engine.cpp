@@ -7,7 +7,15 @@ namespace esphome {
 namespace balboa_spa {
 
 void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
+  if (read_only_ || !registered()) return;
   if (len > Q_FRAME_CAP || q_count_ >= Q_SLOTS) return;  // drop if full/oversized
+  // Public callers may hand us a frame encoded before ownership changed.
+  // Accept one complete, CRC-valid frame only for our current channel.
+  ParsedFrame parsed{};
+  size_t consumed = 0;
+  if (scan_frame(frame, len, &parsed, &consumed) != ScanResult::FRAME ||
+      consumed != len || size_t(parsed.payload_len) + 7 != len ||
+      parsed.src != channel_) return;
   std::memcpy(queue_[q_tail_], frame, len);
   queue_len_[q_tail_] = (uint8_t) len;
   q_tail_ = (q_tail_ + 1) % Q_SLOTS;
@@ -20,9 +28,19 @@ void ProtocolEngine::toggle_item(uint8_t item_code) {
   enqueue_frame(f, n);
 }
 
-void ProtocolEngine::send_now_(const uint8_t *frame, size_t len) {
-  if (read_only_ || !write_fn_) return;
+bool ProtocolEngine::send_now_(const uint8_t *frame, size_t len) {
+  if (read_only_ || !write_fn_) return false;
   write_fn_(frame, len);
+  return true;
+}
+
+void ProtocolEngine::invalidate_ownership_() {
+  registered_ = false;
+  registration_pending_ = false;
+  q_head_ = q_tail_ = q_count_ = 0;
+  statuses_since_our_window_ = 0;
+  config_attempts_ = 0;
+  statuses_since_config_req_ = 0;
 }
 
 // Ask the controller for a channel. Sent in response to a New Client CTS, which
@@ -31,21 +49,26 @@ void ProtocolEngine::request_channel_() {
   if (registered()) return;
   uint8_t f[Q_FRAME_CAP];
   size_t n = encode_id_request(f);
-  send_now_(f, n);
+  registration_pending_ = send_now_(f, n);
 }
 
 void ProtocolEngine::adopt_channel_(uint8_t id) {
-  if (registered() || id == channel::UNASSIGNED) return;
-  channel_ = id;
+  if (registered() || !registration_pending_ || read_only_ || !write_fn_ ||
+      id < channel::MIN || id > channel::MAX) return;
+  invalidate_ownership_();  // no frame encoded under an earlier channel may survive
   uint8_t f[Q_FRAME_CAP];
-  size_t n = encode_id_ack(f, channel_);
-  send_now_(f, n);
-  if (on_channel_assigned) on_channel_assigned(channel_);   // persist it
+  size_t n = encode_id_ack(f, id);
+  if (!send_now_(f, n)) return;
+  channel_ = id;
+  registered_ = true;
+  diagnostics_.channel_adoptions++;
+  if (on_channel_assigned) on_channel_assigned(channel_);
 }
 
 // Ask for whatever config we are still missing, paced by Status broadcasts and
 // bounded so a permanently-unanswered request cannot spam the bus forever.
 void ProtocolEngine::maybe_request_config_() {
+  if (read_only_ || !registered()) return;
   if (have_full_config()) { config_attempts_ = 0; statuses_since_config_req_ = 0; return; }
   if (q_count_ != 0) return;                       // wait for the queue to drain
   statuses_since_config_req_++;
@@ -58,7 +81,7 @@ void ProtocolEngine::maybe_request_config_() {
 
 bool ProtocolEngine::pop_and_send_() {
   if (q_count_ == 0) return false;
-  if (read_only_ || !seen_status_ || !write_fn_) return false;
+  if (read_only_ || !registered() || !seen_status_ || !write_fn_) return false;
   write_fn_(queue_[q_head_], queue_len_[q_head_]);
   q_head_ = (q_head_ + 1) % Q_SLOTS;
   q_count_--;
@@ -193,13 +216,26 @@ void ProtocolEngine::update_filter_cycles(const FilterCyclesData &fc) {
 }
 
 void ProtocolEngine::process_frame(const ParsedFrame &f) {
+  // Count broadcasts even when already registered, and other clients' windows.
+  if (is_new_client_cts(f)) diagnostics_.new_client_cts++;
+  if (is_channel_assignment(f)) {
+    diagnostics_.assignments++;
+    if (f.payload_len > 0) diagnostics_.last_assignment = f.payload[0];
+  }
+  if (is_ready(f)) {
+    diagnostics_.ready++;
+    diagnostics_.last_ready_channel = f.src;
+    if (f.src <= channel::MAX) diagnostics_.ready_by_channel[f.src]++;
+    if (is_ready_for(f, channel_)) diagnostics_.ready_ours++;
+  }
   if (decode_status(f, &status_)) {
     seen_status_ = true;
     if (on_status_update) on_status_update();
     // A channel we hold but are never polled on is stale — give it up and rejoin.
     if (registered() && ++statuses_since_our_window_ >= STALE_CHANNEL_STATUSES) {
+      diagnostics_.channel_stale++;
+      invalidate_ownership_();
       channel_ = channel::UNASSIGNED;
-      statuses_since_our_window_ = 0;
       if (on_channel_stale) on_channel_stale();
     }
     maybe_request_config_();
@@ -222,15 +258,38 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
     if (on_config_update) on_config_update();
     return;
   }
+  // A different observed join request makes the outstanding exchange ambiguous.
+  // Fail closed until the next existing NEW_CLIENT_CTS; add no backoff or delay.
+  // Do not confuse an echo of our unchanged request with another client.
+  if (!registered() && f.src == channel::BROADCAST &&
+      frame_is(f, msg::ID_REQ0, msg::ID_REQ1) && f.payload_len == 3 &&
+      (f.payload[1] != ID_REQUEST_HASH0 || f.payload[2] != ID_REQUEST_HASH1))
+    registration_pending_ = false;
+
+  // A new assignment of our address with a different hash contradicts exclusive
+  // ownership (e.g. controller restart/reallocation). Stop answering immediately;
+  // retain the address only as an observation until a fresh correlated exchange.
+  if (registered() && is_channel_assignment(f) && f.payload_len == 3 &&
+      f.payload[0] == channel_ &&
+      (f.payload[1] != ID_REQUEST_HASH0 || f.payload[2] != ID_REQUEST_HASH1))
+    invalidate_ownership_();
+
   // --- channel negotiation (runs on the 0xfe broadcast channel) ---
   if (!registered()) {
-    if (is_new_client_cts(f)) { request_channel_(); return; }
-    if (is_channel_assignment(f)) { adopt_channel_(channel_from_assignment(f)); return; }
+    if (is_new_client_cts(f) && f.payload_len == 0) { request_channel_(); return; }
+    if (is_channel_assignment(f)) {
+      // Upstream responses carry channel + two request hash bytes. Shortened or
+      // non-echo responses cannot be associated safely: leave them unadopted.
+      if (registration_pending_ && f.payload_len == 3 &&
+          f.payload[1] == ID_REQUEST_HASH0 && f.payload[2] == ID_REQUEST_HASH1)
+        adopt_channel_(channel_from_assignment(f));
+      return;
+    }
   }
 
   // --- transmit ONLY in the window addressed to us ---
   if (is_ready(f)) {
-    if (!is_ready_for(f, channel_)) return;   // another client's slot — stay silent
+    if (!registered() || f.payload_len != 0 || !is_ready_for(f, channel_)) return;   // another client's slot — stay silent
     statuses_since_our_window_ = 0;           // we are still being polled
     if (!pop_and_send_()) {
       // Registered clients must answer every window they are given.
