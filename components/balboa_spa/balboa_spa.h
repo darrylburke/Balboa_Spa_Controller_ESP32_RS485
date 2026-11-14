@@ -19,19 +19,22 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   void loop() override;
   void dump_config() override;
 
-  void set_read_only(bool ro) { read_only_ = ro; }
+  void set_read_only(bool ro) { read_only_ = ro; engine_.set_read_only(ro); }
   // Bring-up only. Transmits a pattern on the UART and reports whether it reads
   // back, proving the ESP32's UART and pins independently of the RS-485 module.
   // DISCONNECT the module and jumper TX->RX before enabling: with the module
   // attached this would put bytes on a shared spa bus outside our Ready window.
   void set_uart_selftest(bool on) { uart_selftest_ = on; }
   // DE+/RE of a MAX485-style module. Held LOW (receive) except while writing.
+  void set_uart_health(Component *component) { uart_component_ = component; }
   void set_direction_pin(GPIOPin *pin) { direction_pin_ = pin; }
 #ifdef USE_TIME
   void set_time(time::RealTimeClock *rtc) { time_ = rtc; }
 #endif
 
   // UART writes completed by this component, including the optional self-test.
+  void set_diagnostic_events(bool enabled) { engine_.events().set_enabled(enabled); }
+  uint32_t diagnostic_boot_id() const { return diagnostic_boot_id_; }
   bool read_only() const { return read_only_; }
   bool uart_selftest() const { return uart_selftest_; }
   uint32_t tx_frames() const { return tx_frames_; }
@@ -55,8 +58,9 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 
  protected:
   void maybe_sync_time_();
-  void bus_write_(const uint8_t *d, size_t n);
+  bool bus_write_(const uint8_t *d, size_t n, bool selftest = false);
 
+  uint32_t diagnostic_boot_id_{0};
   uint32_t tx_frames_{0};
   uint32_t tx_bytes_{0};
   uint8_t last_tx_channel_{0};
@@ -80,6 +84,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   uint32_t last_rx_bytes_{0};
   uint32_t last_diag_ms_{0};
   bool uart_selftest_{false};
+  Component *uart_component_{nullptr};
   GPIOPin *direction_pin_{nullptr};
   uint32_t last_selftest_ms_{0};
   uint32_t selftest_sent_{0};

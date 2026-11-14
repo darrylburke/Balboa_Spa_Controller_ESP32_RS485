@@ -4,6 +4,7 @@
 #include <functional>
 #include "types.h"
 #include "frame.h"
+#include "events.h"
 #include "messages.h"   // channel:: constants used below
 
 namespace esphome {
@@ -25,15 +26,27 @@ struct BusDiagnostics {
 
 class ProtocolEngine {
  public:
+  using CheckedWriteFn = std::function<bool(const uint8_t *, size_t)>;
   using WriteFn = std::function<void(const uint8_t *, size_t)>;
 
   void set_write_fn(WriteFn fn) {
-    if (!fn) invalidate_ownership_();
+    if (!fn) invalidate_ownership_(RejectReason::TRANSPORT);
     registration_pending_ = false;
+    checked_write_fn_ = nullptr;
     write_fn_ = std::move(fn);
   }
+  void set_checked_write_fn(CheckedWriteFn fn) {
+    if (!fn) invalidate_ownership_(RejectReason::TRANSPORT);
+    registration_pending_ = false;
+    write_fn_ = nullptr;
+    checked_write_fn_ = std::move(fn);
+  }
+  EventRecorder &events() { return events_; }
+  TxCause tx_cause() const { return tx_cause_; }
+  uint32_t tx_ref() const { return tx_ref_; }
+  bool trace_write() const { return trace_write_; }
   void set_read_only(bool ro) {
-    if (ro) invalidate_ownership_();
+    if (ro) invalidate_ownership_(RejectReason::PASSIVE);
     read_only_ = ro;
   }
   // Retain the saved address for observation only. A fresh correlated handshake
@@ -43,6 +56,7 @@ class ProtocolEngine {
     invalidate_ownership_();
     channel_ = id;
     diagnostics_.channel_restores++;
+    events_.record(EventKind::RESTORE, id);
   }
 
   const BusDiagnostics &diagnostics() const { return diagnostics_; }
@@ -99,8 +113,9 @@ class ProtocolEngine {
  protected:
   void process_frame(const ParsedFrame &f);
   bool pop_and_send_();
-  bool send_now_(const uint8_t *frame, size_t len);   // bypasses the queue (handshake frames)
-  void invalidate_ownership_();
+  bool send_now_(const uint8_t *frame, size_t len, TxCause cause = TxCause::IDLE, uint32_t ref = 0);   // bypasses the queue (handshake frames)
+  void invalidate_ownership_(RejectReason cause = RejectReason::UNOWNED);
+  bool has_writer_() const { return bool(write_fn_) || bool(checked_write_fn_); }
   void request_channel_();
   void adopt_channel_(uint8_t id);
   void maybe_request_config_();
@@ -125,6 +140,12 @@ class ProtocolEngine {
   uint8_t queue_len_[Q_SLOTS] = {0};
   size_t q_head_ = 0, q_tail_ = 0, q_count_ = 0;
 
+  EventRecorder events_;
+  TxCause tx_cause_ = TxCause::NONE;
+  uint32_t tx_ref_ = 0, registration_ref_ = 0;
+  bool trace_write_ = true;
+  uint32_t queue_ref_[Q_SLOTS] = {};
+  CheckedWriteFn checked_write_fn_;
   WriteFn write_fn_;
   bool read_only_ = false;
   bool registered_ = false;

@@ -1,6 +1,7 @@
 #include "balboa_spa.h"
 #include "esphome/core/log.h"
 #include <cstring>
+#include <ctime>
 
 namespace esphome {
 namespace balboa_spa {
@@ -8,6 +9,13 @@ namespace balboa_spa {
 static const char *const TAG = "balboa_spa";
 
 void BalboaSpa::setup() {
+  diagnostic_boot_id_ = random_uint32();
+  engine_.events().set_clock([]() {
+    std::time_t utc = std::time(nullptr);
+    // System time is unset before synchronization. Do not enable a clock source
+    // or spa time-sync just to obtain diagnostics; absent UTC stays null.
+    return EventTime{millis_64(), utc >= 1577836800 && uint64_t(utc) <= UINT32_MAX ? uint32_t(utc) : 0};
+  });
   if (direction_pin_ != nullptr) {
     // Receive by default. Left floating, a MAX485's DE/RE can enable its driver
     // and hold the shared bus, and the receiver never passes anything to RX.
@@ -15,7 +23,7 @@ void BalboaSpa::setup() {
     direction_pin_->digital_write(false);
   }
   engine_.set_read_only(read_only_);
-  engine_.set_write_fn([this](const uint8_t *d, size_t n) { this->bus_write_(d, n); });
+  engine_.set_checked_write_fn([this](const uint8_t *d, size_t n) { return this->bus_write_(d, n); });
 
   // Load the previous address for diagnostics, never as proof of ownership.
   // Active operation must register again before responding to any channel poll.
@@ -111,7 +119,7 @@ void BalboaSpa::loop() {
     // be mistaken for our echo.
     while (this->available()) { uint8_t d; this->read_byte(&d); }
 
-    this->bus_write_(pattern, sizeof(pattern));
+    this->bus_write_(pattern, sizeof(pattern), true);
     delay(20);   // 8 bytes @115200 is ~0.7ms; allow ample margin
 
     // Compare CONTENT, not just a count. Checking "did any bytes arrive" is
@@ -172,7 +180,16 @@ void BalboaSpa::loop() {
   }
 }
 
-void BalboaSpa::bus_write_(const uint8_t *d, size_t n) {
+bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
+  // Final transport guard covers every path, including accidental self-test use.
+  if (read_only_) {
+    engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::PASSIVE));
+    return false;
+  }
+  if (uart_component_ != nullptr && uart_component_->is_failed()) {
+    engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::TRANSPORT));
+    return false;
+  }
   if (direction_pin_ != nullptr) {
     direction_pin_->digital_write(true);
     delayMicroseconds(10);   // MAX485 driver enable is well under 1 us
@@ -180,15 +197,25 @@ void BalboaSpa::bus_write_(const uint8_t *d, size_t n) {
   this->write_array(d, n);
   // flush() waits for the last stop bit to leave the shifter, so the driver is
   // never released mid-byte.
-  this->flush();
+  auto result = this->flush();
   if (direction_pin_ != nullptr)
     direction_pin_->digital_write(false);
+  if (selftest || engine_.tx_cause() != TxCause::IDLE || engine_.trace_write()) {
+    engine_.events().record(EventKind::UART_RETURN, n >= 5 ? d[2] : 0,
+        n >= 5 ? (uint16_t(d[3]) << 8) | d[4] : 0,
+        (uint32_t(selftest ? TxCause::SELFTEST : engine_.tx_cause()) << 24) |
+        (uint32_t(uart_component_ != nullptr && uart_component_->is_failed()) << 23) |
+        (uint32_t(result) << 16) | uint32_t(n), selftest ? 0 : engine_.tx_ref(),
+        !selftest && engine_.tx_cause() == TxCause::IDLE);
+  }
   tx_frames_++;
   tx_bytes_ += n;
   if (n >= 5) {
     last_tx_channel_ = d[2];
     last_tx_type_ = (uint16_t(d[3]) << 8) | d[4];
   }
+  return result == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS &&
+      (uart_component_ == nullptr || !uart_component_->is_failed());
 }
 
 void BalboaSpa::maybe_sync_time_() {

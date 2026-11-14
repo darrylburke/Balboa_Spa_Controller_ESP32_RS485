@@ -7,8 +7,14 @@ namespace esphome {
 namespace balboa_spa {
 
 void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
-  if (read_only_ || !registered()) return;
-  if (len > Q_FRAME_CAP || q_count_ >= Q_SLOTS) return;  // drop if full/oversized
+  if (read_only_ || !registered()) {
+    events_.record(EventKind::REJECTED, channel_, 0, uint32_t(read_only_ ? RejectReason::PASSIVE : RejectReason::UNOWNED));
+    return;
+  }
+  if (len > Q_FRAME_CAP || q_count_ >= Q_SLOTS) {
+    events_.record(EventKind::REJECTED, channel_, 0, uint32_t(RejectReason::FULL));
+    return;
+  }  // drop if full/oversized
   // Public callers may hand us a frame encoded before ownership changed.
   // Accept one complete, CRC-valid frame only for our current channel.
   ParsedFrame parsed{};
@@ -16,7 +22,12 @@ void ProtocolEngine::enqueue_frame(const uint8_t *frame, size_t len) {
   if (scan_frame(frame, len, &parsed, &consumed) != ScanResult::FRAME ||
       consumed != len || size_t(parsed.payload_len) + 7 != len ||
       parsed.src != channel_ || parsed.type0 != 0xbf ||
-      (parsed.type1 <= 0x07 && parsed.type1 != 0x04)) return;
+      (parsed.type1 <= 0x07 && parsed.type1 != 0x04)) {
+    events_.record(EventKind::REJECTED, channel_, 0, uint32_t(RejectReason::INVALID_FRAME));
+    return;
+  }
+  queue_ref_[q_tail_] = events_.record(EventKind::QUEUED, channel_,
+      (uint16_t(parsed.type0) << 8) | parsed.type1, len);
   std::memcpy(queue_[q_tail_], frame, len);
   queue_len_[q_tail_] = (uint8_t) len;
   q_tail_ = (q_tail_ + 1) % Q_SLOTS;
@@ -29,13 +40,31 @@ void ProtocolEngine::toggle_item(uint8_t item_code) {
   enqueue_frame(f, n);
 }
 
-bool ProtocolEngine::send_now_(const uint8_t *frame, size_t len) {
-  if (read_only_ || !write_fn_) return false;
-  write_fn_(frame, len);
-  return true;
+bool ProtocolEngine::send_now_(const uint8_t *frame, size_t len, TxCause cause, uint32_t ref) {
+  if (read_only_ || !has_writer_()) {
+    if (cause != TxCause::IDLE || trace_write_)
+      events_.record(EventKind::REJECTED, channel_, 0,
+          uint32_t(read_only_ ? RejectReason::PASSIVE : RejectReason::TRANSPORT), ref);
+    return false;
+  }
+  tx_cause_ = cause; tx_ref_ = ref;
+  bool ok = true;
+  if (checked_write_fn_) ok = checked_write_fn_(frame, len);
+  else write_fn_(frame, len);  // legacy callback: return does not report UART success
+  if (cause != TxCause::IDLE || trace_write_)
+    events_.record(cause == TxCause::ACK ? EventKind::ACK_RETURN : EventKind::WRITE_RETURN,
+        len >= 5 ? frame[2] : 0, len >= 5 ? (uint16_t(frame[3]) << 8) | frame[4] : 0,
+        (uint32_t(cause) << 16) | uint32_t(ok), ref, cause == TxCause::IDLE);
+  tx_cause_ = TxCause::NONE;
+  if (!ok) invalidate_ownership_(RejectReason::WRITE_FAILED);
+  return ok;
 }
 
-void ProtocolEngine::invalidate_ownership_() {
+void ProtocolEngine::invalidate_ownership_(RejectReason cause) {
+  if (registered_ || registration_pending_)
+    events_.record(EventKind::OWNERSHIP_LOST, channel_, 0, uint32_t(cause), registration_ref_);
+  if (q_count_)
+    events_.record(EventKind::QUEUE_CLEARED, channel_, 0, q_count_, uint32_t(cause));
   registered_ = false;
   registration_pending_ = false;
   q_head_ = q_tail_ = q_count_ = 0;
@@ -48,21 +77,34 @@ void ProtocolEngine::invalidate_ownership_() {
 // arrives about once a second, so no extra rate limiting is needed.
 void ProtocolEngine::request_channel_() {
   if (registered()) return;
+  if (read_only_ || !has_writer_()) {
+    events_.record(EventKind::REJECTED, channel::BROADCAST, 0xbf01,
+        uint32_t(read_only_ ? RejectReason::PASSIVE : RejectReason::TRANSPORT));
+    return;
+  }
   uint8_t f[Q_FRAME_CAP];
   size_t n = encode_id_request(f);
-  registration_pending_ = send_now_(f, n);
+  registration_ref_ = events_.record(EventKind::REQUEST, channel::BROADCAST, 0xbf01,
+      (uint32_t(ID_REQUEST_HASH0) << 8) | ID_REQUEST_HASH1);
+  registration_pending_ = send_now_(f, n, TxCause::REQUEST, registration_ref_);
 }
 
 void ProtocolEngine::adopt_channel_(uint8_t id) {
-  if (registered() || !registration_pending_ || read_only_ || !write_fn_ ||
-      id < channel::MIN || id > channel::MAX) return;
+  if (registered() || !registration_pending_ || read_only_ || !has_writer_() ||
+      id < channel::MIN || id > channel::MAX) {
+    events_.record(EventKind::REJECTED, id, 0xbf02, uint32_t(RejectReason::INVALID_CHANNEL), registration_ref_);
+    return;
+  }
+  // Assignment consumes the pending exchange, but does not revoke a completed one.
+  registration_pending_ = false;
   invalidate_ownership_();  // no frame encoded under an earlier channel may survive
   uint8_t f[Q_FRAME_CAP];
   size_t n = encode_id_ack(f, id);
-  if (!send_now_(f, n)) return;
+  if (!send_now_(f, n, TxCause::ACK, registration_ref_)) return;
   channel_ = id;
   registered_ = true;
   diagnostics_.channel_adoptions++;
+  events_.record(EventKind::ACCEPTED, id, 0xbf02, 0, registration_ref_);
   if (on_channel_assigned) on_channel_assigned(channel_);
 }
 
@@ -82,8 +124,11 @@ void ProtocolEngine::maybe_request_config_() {
 
 bool ProtocolEngine::pop_and_send_() {
   if (q_count_ == 0) return false;
-  if (read_only_ || !registered() || !seen_status_ || !write_fn_) return false;
-  write_fn_(queue_[q_head_], queue_len_[q_head_]);
+  if (read_only_ || !registered() || !seen_status_ || !has_writer_()) return false;
+  uint32_t ref = queue_ref_[q_head_];
+  bool ok = send_now_(queue_[q_head_], queue_len_[q_head_], TxCause::QUEUE, ref);
+  if (!ok) return true;  // failed write revoked ownership and cleared the queue; never retry toggles
+  events_.record(EventKind::QUEUE_RETIRED, channel_, 0, 1, ref);
   q_head_ = (q_head_ + 1) % Q_SLOTS;
   q_count_--;
   return true;
@@ -218,10 +263,16 @@ void ProtocolEngine::update_filter_cycles(const FilterCyclesData &fc) {
 
 void ProtocolEngine::process_frame(const ParsedFrame &f) {
   // Count broadcasts even when already registered, and other clients' windows.
-  if (is_new_client_cts(f)) diagnostics_.new_client_cts++;
+  if (is_new_client_cts(f)) {
+    diagnostics_.new_client_cts++;
+    if (!registered()) events_.record(EventKind::INVITATION, f.src, 0xbf00, f.payload_len);
+  }
   if (is_channel_assignment(f)) {
     diagnostics_.assignments++;
     if (f.payload_len > 0) diagnostics_.last_assignment = f.payload[0];
+    events_.record(EventKind::ASSIGNMENT, f.payload_len ? f.payload[0] : 0, 0xbf02,
+        f.payload_len >= 3 ? (uint32_t(f.payload[1]) << 8) | f.payload[2] : 0,
+        registration_pending_ ? registration_ref_ : 0);
   }
   if (is_ready(f)) {
     diagnostics_.ready++;
@@ -235,7 +286,7 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
     // A channel we hold but are never polled on is stale — give it up and rejoin.
     if (registered() && ++statuses_since_our_window_ >= STALE_CHANNEL_STATUSES) {
       diagnostics_.channel_stale++;
-      invalidate_ownership_();
+      invalidate_ownership_(RejectReason::UNOWNED);
       channel_ = channel::UNASSIGNED;
       if (on_channel_stale) on_channel_stale();
     }
@@ -265,7 +316,10 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
   if (!registered() && f.src == channel::BROADCAST &&
       frame_is(f, msg::ID_REQ0, msg::ID_REQ1) && f.payload_len == 3 &&
       (f.payload[1] != ID_REQUEST_HASH0 || f.payload[2] != ID_REQUEST_HASH1))
+  {
+    events_.record(EventKind::REJECTED, f.src, 0xbf01, uint32_t(RejectReason::COMPETING_REQUEST), registration_ref_);
     registration_pending_ = false;
+  }
 
   // A new assignment of our address with a different hash contradicts exclusive
   // ownership (e.g. controller restart/reallocation). Stop answering immediately;
@@ -273,7 +327,15 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
   if (registered() && is_channel_assignment(f) && f.payload_len == 3 &&
       f.payload[0] == channel_ &&
       (f.payload[1] != ID_REQUEST_HASH0 || f.payload[2] != ID_REQUEST_HASH1))
-    invalidate_ownership_();
+    invalidate_ownership_(RejectReason::CONFLICT);
+
+  if (registered() && is_channel_assignment(f)) {
+    events_.record(EventKind::REJECTED, f.payload_len ? f.payload[0] : 0, 0xbf02,
+        uint32_t(RejectReason::ALREADY_REGISTERED), registration_ref_);
+    return;
+  }
+  if (is_new_client_cts(f) && f.payload_len != 0)
+    events_.record(EventKind::REJECTED, f.src, 0xbf00, uint32_t(RejectReason::MALFORMED));
 
   // --- channel negotiation (runs on the 0xfe broadcast channel) ---
   if (!registered()) {
@@ -284,19 +346,28 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
       if (registration_pending_ && f.payload_len == 3 &&
           f.payload[1] == ID_REQUEST_HASH0 && f.payload[2] == ID_REQUEST_HASH1)
         adopt_channel_(channel_from_assignment(f));
+      else
+        events_.record(EventKind::REJECTED, f.payload_len ? f.payload[0] : 0, 0xbf02,
+            uint32_t(registration_pending_ ? RejectReason::CORRELATION : RejectReason::UNSOLICITED), registration_ref_);
       return;
     }
   }
 
   // --- transmit ONLY in the window addressed to us ---
   if (is_ready(f)) {
-    if (!registered() || f.payload_len != 0 || !is_ready_for(f, channel_)) return;   // another client's slot — stay silent
+    if (!registered() || f.payload_len != 0 || !is_ready_for(f, channel_)) {
+      if (f.src >= channel::MIN && f.src <= channel::MAX && events_.sample_poll(f.src))
+        events_.record(EventKind::READY, f.src, 0xbf06, f.payload_len, 0, true);
+      return;
+    }   // another client's slot — stay silent
+    trace_write_ = events_.sample_poll(f.src);
+    uint32_t poll_ref = trace_write_ ? events_.record(EventKind::READY, f.src, 0xbf06, 0, 0, true) : 0;
     statuses_since_our_window_ = 0;           // we are still being polled
     if (!pop_and_send_()) {
       // Registered clients must answer every window they are given.
       uint8_t nts[Q_FRAME_CAP];
       size_t n = encode_nothing_to_send(nts, channel_);
-      send_now_(nts, n);
+      send_now_(nts, n, TxCause::IDLE, poll_ref);
     }
     return;
   }

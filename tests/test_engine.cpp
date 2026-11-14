@@ -727,3 +727,55 @@ TEST(engine_transport_removal_revokes_queue_and_authority) {
   CHECK_EQ(sink.writes.size(), 3);
   CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
 }
+
+TEST(engine_failed_registration_writes_never_establish_ownership) {
+  ProtocolEngine e;
+  int calls = 0;
+  e.set_checked_write_fn([&](const uint8_t *, size_t) { return ++calls != 2; });
+  feed_hex(e, CTS);
+  assign_channel(e, 0x11);  // request succeeded, ACK failed locally
+  CHECK(!e.registered());
+  CHECK_EQ(e.diagnostics().channel_adoptions, 0);
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(calls, 2);
+  e.set_checked_write_fn([](const uint8_t *, size_t) { return false; });
+  feed_hex(e, CTS);
+  assign_channel(e, 0x11);
+  CHECK(!e.registered());
+}
+
+TEST(engine_failed_command_write_revokes_authority_without_retry) {
+  ProtocolEngine e;
+  register_engine(e);
+  feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  int calls = 0;
+  e.set_checked_write_fn([&](const uint8_t *, size_t) { calls++; return false; });
+  e.toggle_item(item::LIGHT1);
+  feed_hex(e, READY_OURS);
+  CHECK(!e.registered());
+  feed_hex(e, READY_OURS);
+  CHECK_EQ(calls, 1);
+}
+
+TEST(engine_event_provenance_distinguishes_assignment_ack_and_acceptance) {
+  ProtocolEngine e;
+  e.events().set_enabled(true);
+  e.events().set_clock([]() { return EventTime{1000, 0}; });
+  e.set_checked_write_fn([](const uint8_t *, size_t) { return true; });
+  assign_channel(e, 0x10);
+  feed_hex(e, CTS);
+  assign_channel(e, 0x11);
+  BusEvent ev;
+  uint32_t request = 0, ack = 0, accepted = 0;
+  int candidates = 0, rejected = 0;
+  while (e.events().pop(ev)) {
+    if (ev.kind == EventKind::REQUEST) request = ev.seq;
+    if (ev.kind == EventKind::ACK_RETURN) { ack = ev.seq; CHECK_EQ(ev.ref, request); }
+    if (ev.kind == EventKind::ACCEPTED) { accepted = ev.seq; CHECK_EQ(ev.channel, 0x11); }
+    if (ev.kind == EventKind::ASSIGNMENT) candidates++;
+    if (ev.kind == EventKind::REJECTED) rejected++;
+  }
+  CHECK(request > 0); CHECK(ack > request); CHECK(accepted > ack);
+  CHECK_EQ(candidates, 2); CHECK_EQ(rejected, 1);
+}

@@ -4,7 +4,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
 from esphome.components import uart, time
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_UART_ID
 from esphome.core.config import include_file
 from esphome.helpers import walk_files
 
@@ -20,11 +20,13 @@ CONF_READ_ONLY = "read_only"
 CONF_UART_SELFTEST = "uart_selftest"
 CONF_TIME_ID = "time_id"
 CONF_DIRECTION_PIN = "direction_pin"
+CONF_DIAGNOSTIC_EVENTS = "diagnostic_events"
 
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(BalboaSpa),
+            cv.Optional(CONF_DIAGNOSTIC_EVENTS, default=False): cv.boolean,
             cv.Optional(CONF_READ_ONLY, default=True): cv.boolean,
             # Bring-up only: transmit a pattern and check it reads back.
             # DISCONNECT the RS-485 module first and jumper TX->RX directly.
@@ -56,8 +58,11 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+    uart_component = await cg.get_variable(config[CONF_UART_ID])
+    cg.add(var.set_uart_health(uart_component))
     cg.add(var.set_read_only(config[CONF_READ_ONLY]))
     cg.add(var.set_uart_selftest(config[CONF_UART_SELFTEST]))
+    cg.add(var.set_diagnostic_events(config[CONF_DIAGNOSTIC_EVENTS]))
     if CONF_TIME_ID in config:
         rtc = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time(rtc))
