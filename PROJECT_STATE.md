@@ -63,3 +63,13 @@ Do not deploy collector/HA/infrastructure changes as part of firmware verificati
 Historical notes were preserved locally in
 `.esphome/offline-review/PROJECT_STATE.previous.md`; obsolete hardware-unknown and
 pre-passive commissioning claims have been superseded here.
+
+
+## Observed-state publication follow-up
+
+At `0ef5901`, status changes already notified entities immediately; the missing
+item was a consolidated 10-second snapshot. The follow-up on the same branch adds
+`balboa/waveshare/state`, fresh-observation/age metadata and tested field-wise
+notification policy. No protocol/UART safety or timing code changed. Latest test,
+commit and passive candidate records: `.esphome/status-review/`. Measured <=1s
+HA receipt remains a passive commissioning acceptance test, not an offline result.

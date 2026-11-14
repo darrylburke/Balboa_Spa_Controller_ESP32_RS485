@@ -138,3 +138,10 @@ See [readiness and patch checklist](docs/offline-readiness.md),
 [the staged commissioning/rollback procedure](docs/bp200g1-commissioning.md).
 The optional versioned event package preserves the original diagnostic topic.
 No offline test result establishes physical coexistence or authorizes transmission.
+
+
+Observed Jets/Light changes notify existing MQTT entities immediately. A separate
+non-retained `<mqtt topic_prefix>/state` snapshot publishes observed state around
+every 10 seconds, with explicit freshness and observation age. It never waits for
+that timer to notify changed entities. See [the publication audit](docs/status-publication-audit.md)
+for source/test evidence and the unmeasured one-second HA delivery target.

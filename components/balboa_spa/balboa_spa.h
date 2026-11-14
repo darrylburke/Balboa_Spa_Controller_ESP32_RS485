@@ -8,6 +8,7 @@
 #include "esphome/components/time/real_time_clock.h"
 #endif
 #include "protocol/protocol_engine.h"
+#include "protocol/status_publication.h"
 
 namespace esphome {
 namespace balboa_spa {
@@ -33,6 +34,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 #endif
 
   // UART writes completed by this component, including the optional self-test.
+  void set_state_snapshot_topic(const std::string &topic) { state_snapshot_topic_ = topic; }
   void set_registration_only(bool enabled) { engine_.set_registration_only(enabled); }
   void set_command_ttl_ms(uint32_t ttl) { engine_.set_command_ttl_ms(ttl); }
   void set_diagnostic_events(bool enabled) { engine_.events().set_enabled(enabled); }
@@ -60,6 +62,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 
  protected:
   void maybe_sync_time_();
+  void publish_state_snapshot_();
   bool bus_write_(const uint8_t *d, size_t n, bool selftest = false);
 
   uint32_t diagnostic_boot_id_{0};
@@ -74,10 +77,8 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   // The spa broadcasts Status ~1/s; treat a long gap as the bus being down.
   static constexpr uint32_t BUS_TIMEOUT_MS = 15000;
   uint32_t last_status_ms_{0};
-  // Entities are re-notified only when Status changes, or this often regardless.
-  static constexpr uint32_t STATUS_REFRESH_MS = 60000;
-  SpaStatus last_published_status_{};
-  uint32_t last_status_publish_ms_{0};
+  StatusPublication status_publication_;
+  std::string state_snapshot_topic_;
   bool bus_connected_{false};
   // A healthy Balboa bus is ~1000 B/s; a floating rx pin yields tens of B/s of
   // EMI noise. Anything under this is not real traffic.

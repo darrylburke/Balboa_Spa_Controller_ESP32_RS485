@@ -2,6 +2,10 @@
 #include "esphome/core/log.h"
 #include <cstring>
 #include <ctime>
+#include "protocol/temperature.h"
+#ifdef USE_MQTT
+#include "esphome/components/mqtt/mqtt_client.h"
+#endif
 
 namespace esphome {
 namespace balboa_spa {
@@ -58,14 +62,8 @@ void BalboaSpa::setup() {
     // select publish on every call, so fanning out each one flooded MQTT (12k
     // dropped messages/10s) and kept knocking the broker link over. Notify
     // entities only on change, plus a periodic refresh.
-    const SpaStatus &st = this->engine_.status();
-    uint32_t now = millis();
-    if (std::memcmp(&st, &this->last_published_status_, sizeof(SpaStatus)) != 0 ||
-        (now - this->last_status_publish_ms_) > STATUS_REFRESH_MS) {
-      std::memcpy(&this->last_published_status_, &st, sizeof(SpaStatus));
-      this->last_status_publish_ms_ = now;
+    if (this->status_publication_.observe(this->engine_.status(), millis_64()))
       this->status_cb_.call();
-    }
     this->maybe_sync_time_();
   };
   engine_.on_config_update = [this]() {
@@ -86,6 +84,12 @@ void BalboaSpa::setup() {
       this->discovery_logged_ = true;
     }
   };
+#ifdef USE_MQTT
+  // Serialization/publication runs outside feed()/process_frame(). No bus timer,
+  // registration or response opportunity is changed by this presentation timer.
+  this->set_interval("observed_state_snapshot", StatusPublication::SNAPSHOT_MS,
+                     [this]() { this->publish_state_snapshot_(); });
+#endif
 }
 
 void BalboaSpa::loop() {
@@ -220,6 +224,64 @@ bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
   }
   return result == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS &&
       (uart_component_ == nullptr || !uart_component_->is_failed());
+}
+
+void BalboaSpa::publish_state_snapshot_() {
+#ifdef USE_MQTT
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return;
+  if (state_snapshot_topic_.empty()) {
+    state_snapshot_topic_ = client->get_topic_prefix();
+    if (!state_snapshot_topic_.empty() && state_snapshot_topic_.back() != '/') state_snapshot_topic_ += '/';
+    state_snapshot_topic_ += "state";
+  }
+  const auto now = engine_.events().now();
+  const SpaStatus &s = engine_.status();
+  const bool fresh = status_publication_.snapshot_fresh(s, bus_connected_, now.uptime_ms);
+  bool accepted = client->publish_json(state_snapshot_topic_, [&](JsonObject root) {
+    root["schema_version"] = 1;
+    root["boot_id"] = diagnostic_boot_id_;
+    root["uptime_ms"] = now.uptime_ms;
+    if (now.utc_s) root["utc_s"] = now.utc_s;
+    else root["utc_s"] = nullptr;
+    root["bus_connected"] = bus_connected_;
+    root["fresh"] = fresh;
+    root["observation_seq"] = status_publication_.observation_seq();
+    if (status_publication_.have_observation()) {
+      root["observed_uptime_ms"] = status_publication_.observed_ms();
+      root["status_age_ms"] = now.uptime_ms - status_publication_.observed_ms();
+    } else {
+      root["observed_uptime_ms"] = nullptr;
+      root["status_age_ms"] = nullptr;
+    }
+    if (!fresh) { root["status"] = nullptr; return; }
+    auto state = root["status"].to<JsonObject>();
+    if (s.current_temp_valid) state["current_temperature_c"] = spa_raw_to_celsius(s.current_temp_raw, s.temp_scale);
+    else state["current_temperature_c"] = nullptr;
+    state["target_temperature_c"] = spa_raw_to_celsius(s.target_temp_raw, s.temp_scale);
+    auto pumps = state["pumps"].to<JsonArray>();
+    for (auto speed : s.pumps) pumps.add(speed);
+    auto lights = state["lights"].to<JsonArray>();
+    for (auto on : s.lights) lights.add(on);
+    auto aux = state["aux"].to<JsonArray>();
+    for (auto on : s.aux) aux.add(on);
+    state["blower"] = s.blower;
+    state["hold"] = s.hold;
+    state["priming"] = s.priming;
+    state["heating"] = s.heating;
+    state["heating_mode_raw"] = uint8_t(s.heating_mode);
+    state["temperature_scale_raw"] = uint8_t(s.temp_scale);
+    state["temperature_range_raw"] = uint8_t(s.temp_range);
+    state["circulation_pump"] = s.circulation_pump;
+    state["mister"] = s.mister;
+    state["filter1_running"] = s.filter_running[0];
+    state["filter2_running"] = s.filter_running[1];
+    state["notification"] = s.notification;
+    state["hour"] = s.hour;
+    state["minute"] = s.minute;
+  }, 0, false);
+  if (accepted) status_publication_.snapshot_published();
+#endif
 }
 
 void BalboaSpa::maybe_sync_time_() {

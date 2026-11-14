@@ -36,6 +36,11 @@ Review artifacts and commit identity are recorded locally in
 build uses `/tmp/balboa-offline-production/waveshare-balboa/build/`. Preserve needed /tmp artifacts
 before clearing temporary files. Do not overwrite the rollback directory.
 
+The latest publication candidate and checksum-guarded future upload/rollback
+commands are recorded under `.esphome/status-review/`. See the
+[publication audit](status-publication-audit.md) before using the earlier candidate
+artifacts. The command scripts are supplied for review and were not executed.
+
 ## 1. Passive candidate validation (future, separately approved)
 
 Only after approval, deploy the candidate with both passive settings unchanged.
@@ -45,6 +50,9 @@ read-only subscriber, and compare telemetry with the TP500. Verify:
 
 - `read_only=true`, `uart_selftest=false` in every snapshot.
 - `tx_frames=tx_bytes=0`, `channel_adoptions=0`, and receive/poll counters advance.
+- Consolidated `balboa/waveshare/state` snapshots arrive around every 10s with
+  fresh observations. Measure decoded Jets/Light status -> HA MQTT receipt <=1s
+  using a common-clock trace; offline dispatch tests do not establish that bound.
 - TP500 controls remain responsive; telemetry continues to match the panel.
 - A restored nonzero `channel`, `channel_restores=1`, or growing `ready_ours` does
   not count as ownership. They may simply describe the TP500's channel.
