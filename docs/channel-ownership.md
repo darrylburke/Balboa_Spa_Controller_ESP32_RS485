@@ -34,6 +34,10 @@ The earlier implementation explicitly resumed the saved channel. Commit
 records hardware verification that the controller kept polling that slot after
 a gateway reboot. It also records five leaked slots increasing READY response
 latency from 1.19 ms to 14.17 ms. That evidence is not refuted by this change.
+It comes from the maintainer's CNBP501X multi-pump US setup; this PR's field
+target is a BP200G1/TP500 European single-pump setup. Those are distinct
+configurations: the maintainer's result remains evidence for the former, but
+does not establish resume behavior or panel coexistence on the latter.
 
 Fresh correlated registration avoids transmitting under a saved channel after
 the controller may have reassigned it, but can consume another slot after a
