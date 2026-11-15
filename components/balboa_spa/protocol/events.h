@@ -37,6 +37,8 @@ class EventRecorder {
   using ClockFn = std::function<EventTime()>;
   static constexpr size_t CRITICAL_CAP = 64;
   static constexpr size_t SAMPLE_CAP = 16;
+  static constexpr size_t IDLE_SAMPLE_SLOTS = 3;
+  static constexpr size_t BATCH_CAP = 16;
   void set_enabled(bool enabled) { enabled_ = enabled; }
   bool enabled() const { return enabled_; }
   void set_clock(ClockFn clock) { clock_ = std::move(clock); }
@@ -59,17 +61,71 @@ class EventRecorder {
     else { e = sample_[sample_head_]; sample_head_ = (sample_head_ + 1) % SAMPLE_CAP; sample_count_--; }
     return true;
   }
+  template<typename Publisher> bool publish_batch(bool connected, Publisher publish) {
+    if (!enabled_ || !connected) return false;
+    BusEvent batch[BATCH_CAP];
+    const size_t count = peek_batch(batch, BATCH_CAP);
+    if (!publish(batch, count)) return false;
+    return consume_batch(batch, count);
+  }
+  size_t peek_batch(BusEvent *batch, size_t capacity) const {
+    size_t critical_index = 0, sample_index = 0, copied = 0;
+    while (copied < capacity && (critical_index < count_ || sample_index < sample_count_)) {
+      bool critical = sample_index == sample_count_ || (critical_index < count_ &&
+          int32_t(critical_[(head_ + critical_index) % CRITICAL_CAP].seq -
+                  sample_[(sample_head_ + sample_index) % SAMPLE_CAP].seq) < 0);
+      batch[copied++] = critical ? critical_[(head_ + critical_index++) % CRITICAL_CAP] :
+          sample_[(sample_head_ + sample_index++) % SAMPLE_CAP];
+    }
+    return copied;
+  }
+  bool consume_batch(const BusEvent *batch, size_t size) {
+    size_t critical_index = 0, sample_index = 0;
+    // Validate the entire prefix before consuming anything. A changed/evicted
+    // prefix must not remove unrelated newer records after publisher admission.
+    for (size_t i = 0; i < size; i++) {
+      if (critical_index == count_ && sample_index == sample_count_) return false;
+      bool critical = sample_index == sample_count_ || (critical_index < count_ &&
+          int32_t(critical_[(head_ + critical_index) % CRITICAL_CAP].seq -
+                  sample_[(sample_head_ + sample_index) % SAMPLE_CAP].seq) < 0);
+      const auto &current = critical ? critical_[(head_ + critical_index++) % CRITICAL_CAP] :
+          sample_[(sample_head_ + sample_index++) % SAMPLE_CAP];
+      if (current.seq != batch[i].seq) return false;
+    }
+    head_ = (head_ + critical_index) % CRITICAL_CAP; count_ -= critical_index;
+    sample_head_ = (sample_head_ + sample_index) % SAMPLE_CAP; sample_count_ -= sample_index;
+    return true;
+  }
   uint32_t lost() const { return lost_; }
   uint32_t sample_lost() const { return sample_lost_; }
   uint32_t coalesced() const { return coalesced_; }
+  uint32_t other_frames_coalesced() const { return other_frames_coalesced_; }
   size_t pending() const { return count_ + sample_count_; }
-  bool sample_poll(uint8_t channel) {
+  bool sample_poll(uint8_t channel, size_t required_slots = 1) {
     if (!enabled_ || channel >= 48) return false;
+    // Do not allocate sequence numbers or overwrite evidence for an optional
+    // sample when publication is delayed. Own READY/UART/return chains need
+    // three slots; mandatory replies themselves never depend on sampling.
+    const size_t limit = required_slots == 1 ? SAMPLE_CAP - IDLE_SAMPLE_SLOTS : SAMPLE_CAP;
+    if (required_slots == 0 || required_slots > limit || sample_count_ > limit - required_slots) {
+      coalesced_++;
+      return false;
+    }
     uint64_t ms = now().uptime_ms;
     if (!sample_seen_[channel] || ms - sample_ms_[channel] >= 5000) {
       sample_seen_[channel] = true; sample_ms_[channel] = ms; return true;
     }
     coalesced_++;
+    return false;
+  }
+  bool sample_other_frame(uint8_t channel) {
+    if (!enabled_ || channel >= 48) return false;
+    const uint64_t ms = now().uptime_ms;
+    if (sample_count_ < SAMPLE_CAP - IDLE_SAMPLE_SLOTS &&
+        (!other_seen_[channel] || ms - other_ms_[channel] >= 5000)) {
+      other_seen_[channel] = true; other_ms_[channel] = ms; return true;
+    }
+    other_frames_coalesced_++;
     return false;
   }
   static const char *name(EventKind k) {
@@ -93,10 +149,13 @@ class EventRecorder {
   bool enabled_ = false;
   ClockFn clock_;
   uint32_t seq_ = 0, lost_ = 0, sample_lost_ = 0, coalesced_ = 0;
+  uint32_t other_frames_coalesced_ = 0;
   BusEvent critical_[CRITICAL_CAP], sample_[SAMPLE_CAP];
   size_t head_ = 0, count_ = 0, sample_head_ = 0, sample_count_ = 0;
   uint64_t sample_ms_[48] = {};
   bool sample_seen_[48] = {};
+  uint64_t other_ms_[48] = {};
+  bool other_seen_[48] = {};
 };
 
 }  // namespace balboa_spa

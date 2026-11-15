@@ -84,7 +84,8 @@ success fail closed through the checked path; older ESPHome/platform compatibili
 is not claimed. Legacy void protocol-library write callbacks remain source-compatible
 but expose only callback-return evidence. Actual physical timing has not been measured.
 
-The event batch has a conservative 3,618-byte compact-JSON bound (16 events/5s);
+The event batch has a conservative 3,700-byte compact-JSON bound (16 events/5s,
+including the additive `other_frames_coalesced` counter);
 64 critical + 16 sampled records reserve fixed storage. Existing 30-second JSON
 remains at its previously checked 20 fields and bounded channel map. Event loss,
 sampling, unsynchronized UTC and unavailable collector persistence are explicit,

@@ -9,6 +9,9 @@
 #endif
 #include "protocol/protocol_engine.h"
 #include "protocol/status_publication.h"
+#include "protocol/transport_write.h"
+#include "protocol/boot_trace.h"
+#include <string>
 
 namespace esphome {
 namespace balboa_spa {
@@ -33,12 +36,13 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   void set_time(time::RealTimeClock *rtc) { time_ = rtc; }
 #endif
 
-  // UART writes completed by this component, including the optional self-test.
-  void set_state_snapshot_topic(const std::string &topic) { state_snapshot_topic_ = topic; }
+  void set_mqtt_command_state(bool enabled) { mqtt_command_state_ = enabled; }
   void set_registration_only(bool enabled) { engine_.set_registration_only(enabled); }
   void set_command_ttl_ms(uint32_t ttl) { engine_.set_command_ttl_ms(ttl); }
   void set_diagnostic_events(bool enabled) { engine_.events().set_enabled(enabled); }
   uint32_t diagnostic_boot_id() const { return diagnostic_boot_id_; }
+  const BootTrace &diagnostic_boot_trace() const;
+  bool transport_faulted() const { return transport_write_.faulted(); }
   bool read_only() const { return read_only_; }
   bool uart_selftest() const { return uart_selftest_; }
   uint32_t tx_frames() const { return tx_frames_; }
@@ -62,8 +66,14 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 
  protected:
   void maybe_sync_time_();
-  void publish_state_snapshot_();
+  void publish_command_response_(const char *request, const char *command,
+                                 const char *value, uint8_t index);
+  bool publish_config_snapshot_();
+  void handle_mqtt_command_(const std::string &payload);
+  void publish_status_response_(uint8_t selector);
+  void publish_debug_response_(uint8_t selector);
   bool bus_write_(const uint8_t *d, size_t n, bool selftest = false);
+  TransportWrite transport_write_;
 
   uint32_t diagnostic_boot_id_{0};
   uint32_t tx_frames_{0};
@@ -78,7 +88,9 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   static constexpr uint32_t BUS_TIMEOUT_MS = 15000;
   uint32_t last_status_ms_{0};
   StatusPublication status_publication_;
-  std::string state_snapshot_topic_;
+  std::string status_topic_;
+  bool mqtt_command_state_{false};
+  bool config_publish_pending_{false};
   bool bus_connected_{false};
   // A healthy Balboa bus is ~1000 B/s; a floating rx pin yields tens of B/s of
   // EMI noise. Anything under this is not real traffic.

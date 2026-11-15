@@ -50,8 +50,9 @@ read-only subscriber, and compare telemetry with the TP500. Verify:
 
 - `read_only=true`, `uart_selftest=false` in every snapshot.
 - `tx_frames=tx_bytes=0`, `channel_adoptions=0`, and receive/poll counters advance.
-- Consolidated `balboa/waveshare/state` snapshots arrive around every 10s with
-  fresh observations. Measure decoded Jets/Light status -> HA MQTT receipt <=1s
+- Per-entity HA `/state` values publish immediately on observed changes and refresh
+  every 30 seconds while valid spa status arrives. Typed diagnostics use `/status`
+  only when requested. Measure decoded Jets/Light status -> HA MQTT receipt <=1s
   using a common-clock trace; offline dispatch tests do not establish that bound.
 - TP500 controls remain responsive; telemetry continues to match the panel.
 - A restored nonzero `channel`, `channel_restores=1`, or growing `ready_ours` does

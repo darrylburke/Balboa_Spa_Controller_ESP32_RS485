@@ -362,7 +362,10 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
   // be inferred from status alone, and are a commissioning limitation.
   if (f.src != channel_ && f.src >= channel::MIN && f.src <= channel::MAX &&
       frame_is(f, 0xbf, 0x11) && f.payload_len == 2) {
-    events_.record(EventKind::OTHER_TOGGLE, f.src, 0xbf11, f.payload[0]);
+    if (events_.sample_other_frame(f.src))
+      events_.record(EventKind::OTHER_TOGGLE, f.src, 0xbf11, f.payload[0], 0, true);
+    // Cancellation examines every observed frame even when optional evidence
+    // is coalesced. Queue retirement remains a critical event.
     cancel_item_(f.payload[0]);
   }
 
@@ -416,7 +419,7 @@ void ProtocolEngine::process_frame(const ParsedFrame &f) {
         events_.record(EventKind::READY, f.src, 0xbf06, f.payload_len, 0, true);
       return;
     }   // another client's slot — stay silent
-    trace_write_ = events_.sample_poll(f.src);
+    trace_write_ = events_.sample_poll(f.src, 3);
     uint32_t poll_ref = trace_write_ ? events_.record(EventKind::READY, f.src, 0xbf06, 0, 0, true) : 0;
     statuses_since_our_window_ = 0;           // we are still being polled
     if (!pop_and_send_()) {

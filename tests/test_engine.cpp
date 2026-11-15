@@ -814,6 +814,72 @@ TEST(engine_observed_panel_toggle_cancels_pending_same_item_only) {
   CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
 }
 
+TEST(engine_other_client_observations_cannot_evict_registration_evidence) {
+  ProtocolEngine e; e.events().set_enabled(true); register_engine(e);
+  CHECK(e.registered());
+  uint8_t other[16]; size_t n = encode_toggle_item(other, 0, 0x10);
+  for (int i = 0; i < 200; i++) e.feed(other, n);
+  CHECK_EQ(e.events().lost(), 0); CHECK_EQ(e.events().sample_lost(), 0);
+  BusEvent event; bool request = false, accepted = false;
+  while (e.events().pop(event)) {
+    request |= event.kind == EventKind::REQUEST;
+    accepted |= event.kind == EventKind::ACCEPTED;
+  }
+  CHECK(request); CHECK(accepted);
+  CHECK_EQ(e.events().other_frames_coalesced(), 199);
+}
+
+TEST(engine_coalesced_other_client_observation_still_cancels_each_matching_item) {
+  ProtocolEngine e; register_engine(e); feed_hex(e, STATUS_FRAME);
+  for (int i = 0; i < 3; i++) feed_hex(e, READY_OURS);
+  e.events().set_enabled(true);
+  e.toggle_item(item::LIGHT1); e.toggle_item(item::PUMP1);
+  uint8_t panel[16]; size_t n = encode_toggle_item(panel, item::LIGHT1, 0x10); e.feed(panel, n);
+  n = encode_toggle_item(panel, item::PUMP1, 0x10); e.feed(panel, n);
+  CHECK_EQ(e.events().other_frames_coalesced(), 1);
+  Sink sink; e.set_write_fn([&](const uint8_t *d, size_t n) { sink(d, n); });
+  feed_hex(e, READY_OURS); CHECK_EQ(sink.writes.size(), 1); CHECK_EQ(sink.writes.back()[4], msg::NOTHING1);
+  unsigned retired = 0; BusEvent event;
+  while (e.events().pop(event)) retired += event.kind == EventKind::QUEUE_RETIRED;
+  CHECK_EQ(retired, 2);
+}
+
+TEST(engine_delayed_provenance_publication_preserves_join_and_all_mandatory_replies) {
+  ProtocolEngine e; e.set_registration_only(true); e.events().set_enabled(true);
+  EventTime clock{0,0}; e.events().set_clock([&]() { return clock; });
+  unsigned writes = 0;
+  e.set_checked_write_fn([&](const uint8_t *d, size_t n) {
+    writes++;
+    if (e.tx_cause() != TxCause::IDLE || e.trace_write())
+      e.events().record(EventKind::UART_RETURN, d[2], (uint16_t(d[3]) << 8) | d[4],
+          (uint32_t(e.tx_cause()) << 24) | uint32_t(n), e.tx_ref(), e.tx_cause() == TxCause::IDLE);
+    return true;
+  });
+  feed_hex(e, CTS); assign_channel(e, 0x27); CHECK(e.registered());
+  uint8_t frame[16];
+  // Three simulated minutes with no recorder drain, more other-client traffic
+  // than observed on the controller, and an idle reply on every own poll.
+  for (unsigned i = 0; i < 1800; i++) {
+    clock.uptime_ms = i * 100;
+    for (uint8_t ch = 0x10; ch <= 0x26; ch++) {
+      size_t n = build_frame(frame, ch, 0xbf, 0x06, nullptr, 0); e.feed(frame, n);
+    }
+    size_t n = encode_toggle_item(frame, 0, 0x10); e.feed(frame, n);
+    n = build_frame(frame, 0x27, 0xbf, 0x06, nullptr, 0); e.feed(frame, n);
+  }
+  CHECK_EQ(writes, 1802); CHECK(e.registered());
+  CHECK_EQ(e.events().lost(), 0); CHECK_EQ(e.events().sample_lost(), 0);
+  CHECK(e.events().coalesced() > 0); CHECK(e.events().other_frames_coalesced() > 0);
+  BusEvent ev; uint32_t seq = 0; bool request = false, accepted = false, idle = false;
+  while (e.events().pop(ev)) {
+    CHECK_EQ(ev.seq, ++seq);
+    request |= ev.kind == EventKind::REQUEST;
+    accepted |= ev.kind == EventKind::ACCEPTED;
+    idle |= ev.kind == EventKind::UART_RETURN && ev.frame_type == 0xbf07;
+  }
+  CHECK(request); CHECK(accepted); CHECK(idle);
+}
+
 // Unit-level state fixtures test the implemented arithmetic, not the BP200G1's
 // unmeasured physical cycle or capability encoding.
 struct CommandStateEngine : ProtocolEngine {

@@ -1,7 +1,15 @@
 #include "balboa_spa.h"
 #include "esphome/core/log.h"
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <ctime>
+#include <sstream>
+#ifdef USE_ESP32
+#include <esp_attr.h>
+#include <esp_system.h>
+#include <esp_wifi.h>
+#endif
 #include "protocol/temperature.h"
 #ifdef USE_MQTT
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -11,8 +19,22 @@ namespace esphome {
 namespace balboa_spa {
 
 static const char *const TAG = "balboa_spa";
+#ifdef USE_ESP32
+RTC_NOINIT_ATTR static BootTrace boot_trace;
+#else
+static BootTrace boot_trace;
+#endif
+
+const BootTrace &BalboaSpa::diagnostic_boot_trace() const { return boot_trace; }
 
 void BalboaSpa::setup() {
+#ifdef USE_ESP32
+  const auto reason = esp_reset_reason();
+  boot_trace.begin(uint32_t(reason), reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT ||
+      reason == ESP_RST_WDT || reason == ESP_RST_PANIC);
+#else
+  boot_trace.begin(0, false);
+#endif
   diagnostic_boot_id_ = random_uint32();
   engine_.events().set_clock([]() {
     std::time_t utc = std::time(nullptr);
@@ -52,6 +74,7 @@ void BalboaSpa::setup() {
     this->channel_pref_.save(&none);
   };
   engine_.on_status_update = [this]() {
+    boot_trace.mark(ExecutionStage::STATUS_CALLBACK);
     this->last_status_ms_ = millis();
     if (!this->bus_connected_) {
       this->bus_connected_ = true;
@@ -61,13 +84,20 @@ void BalboaSpa::setup() {
     // The spa repeats Status several times a second. Sensors, climate, fan and
     // select publish on every call, so fanning out each one flooded MQTT (12k
     // dropped messages/10s) and kept knocking the broker link over. Notify
-    // entities only on change, plus a periodic refresh.
-    if (this->status_publication_.observe(this->engine_.status(), millis_64()))
+    // entities on change, with a bounded periodic refresh.
+    if (this->status_publication_.observe(this->engine_.status(), millis_64())) {
+      boot_trace.mark(ExecutionStage::ENTITY_CALLBACKS);
+      // HA consumes plain values on its per-entity topics. The JSON STATUS
+      // envelope is only sent in response to a STATUS command.
       this->status_cb_.call();
+    }
+    boot_trace.mark(ExecutionStage::TIME_SYNC);
     this->maybe_sync_time_();
+    boot_trace.mark(ExecutionStage::PROTOCOL_FEED);
   };
   engine_.on_config_update = [this]() {
     this->config_cb_.call();
+    if (this->mqtt_command_state_) this->config_publish_pending_ = true;
     if (!this->discovery_logged_ && this->engine_.config().valid && this->engine_.info().valid) {
       const SpaConfig &c = this->engine_.config();
       const SpaInfo &i = this->engine_.info();
@@ -85,23 +115,34 @@ void BalboaSpa::setup() {
     }
   };
 #ifdef USE_MQTT
-  // Serialization/publication runs outside feed()/process_frame(). No bus timer,
-  // registration or response opportunity is changed by this presentation timer.
-  this->set_interval("observed_state_snapshot", StatusPublication::SNAPSHOT_MS,
-                     [this]() { this->publish_state_snapshot_(); });
+  if (this->mqtt_command_state_) {
+    auto *client = mqtt::global_mqtt_client;
+    if (client != nullptr) {
+      std::string command_topic = client->get_topic_prefix();
+      if (!command_topic.empty() && command_topic.back() != '/') command_topic += '/';
+      command_topic += "command";
+      client->subscribe(command_topic,
+          [this](const std::string &, const std::string &payload) { this->handle_mqtt_command_(payload); }, 1);
+    }
+  }
 #endif
+  boot_trace.mark(ExecutionStage::OUTSIDE);
 }
 
 void BalboaSpa::loop() {
+  boot_trace.mark(ExecutionStage::UART_AVAILABLE);
   int avail = this->available();
   while (avail > 0) {
     int n = avail > (int) sizeof(rx_chunk_) ? (int) sizeof(rx_chunk_) : avail;
+    boot_trace.mark(ExecutionStage::UART_READ);
     this->read_array(rx_chunk_, n);
     rx_bytes_ += (uint32_t) n;
+    boot_trace.mark(ExecutionStage::PROTOCOL_FEED);
     engine_.feed(rx_chunk_, n);
     avail -= n;
   }
 
+  boot_trace.mark(ExecutionStage::OUTSIDE);
   // Bring-up diagnostic: report what the UART is actually seeing. The three
   // outcomes point at different faults, so print them until the bus is healthy:
   //   bytes=0                  -> nothing reaching RX: wiring, TX/RX not crossed,
@@ -173,18 +214,22 @@ void BalboaSpa::loop() {
              (unsigned) engine_.frames_decoded(), verdict);
   }
 
-  // Detect the bus going quiet. Every published state topic is retained, so
-  // without this the last values sit on the broker looking current while the
-  // spa is actually unreachable.
+  // Detect the bus going quiet so the non-retained per-entity bus-connected
+  // state changes immediately and the user can distinguish stale spa data.
   if (this->bus_connected_ && (millis() - this->last_status_ms_) > BUS_TIMEOUT_MS) {
     this->bus_connected_ = false;
     ESP_LOGW(TAG, "RS-485 bus lost (no Status for %ums); published values are now stale",
              (unsigned) BUS_TIMEOUT_MS);
     this->bus_cb_.call();
   }
+  if (this->mqtt_command_state_ && this->config_publish_pending_ && this->publish_config_snapshot_())
+    this->config_publish_pending_ = false;
 }
 
 bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
+  ExecutionScope execution(boot_trace, ExecutionStage::TX_CHECK);
+  boot_trace.frame_type = n >= 5 ? (uint32_t(d[3]) << 8) | d[4] : 0;
+  boot_trace.length = n;
   // Final transport guard covers every path, including accidental self-test use.
   if (read_only_) {
     engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::PASSIVE));
@@ -194,20 +239,37 @@ bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
     engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::REGISTRATION_ONLY));
     return false;
   }
-  if (uart_component_ != nullptr && uart_component_->is_failed()) {
+  if (parent_ == nullptr || (uart_component_ != nullptr && uart_component_->is_failed())) {
     engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::TRANSPORT));
     return false;
   }
-  if (direction_pin_ != nullptr) {
-    direction_pin_->digital_write(true);
-    delayMicroseconds(10);   // MAX485 driver enable is well under 1 us
+  auto result = uart::UARTFlushResult::UART_FLUSH_RESULT_FAILED;
+  const bool already_faulted = transport_write_.faulted();
+  bool ok = transport_write_.send(n,
+      [this]() { return parent_->available_for_write(); },
+      [this]() { return uart_component_ == nullptr || !uart_component_->is_failed(); },
+      [this](bool drive) {
+        if (direction_pin_ != nullptr) {
+          direction_pin_->digital_write(drive);
+          if (drive) delayMicroseconds(10);
+        }
+      },
+      [this, d, n]() { boot_trace.mark(ExecutionStage::TX_WRITE); this->write_array(d, n); },
+      [this, &result](uint32_t timeout_ms) {
+        // IDF honors this local liveness limit. It is not a protocol response
+        // deadline, and a timeout must never become a toggle retry.
+        parent_->set_flush_timeout(timeout_ms);
+        boot_trace.mark(ExecutionStage::TX_DRAIN);
+        result = this->flush();
+        return result == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS;
+      });
+  boot_trace.mark(ExecutionStage::TX_RELEASED);
+  if (!already_faulted && transport_write_.faulted())
+    ESP_LOGE(TAG, "UART transport fault; further writes disabled until reboot");
+  if (!transport_write_.attempted()) {
+    engine_.events().record(EventKind::REJECTED, engine_.channel(), 0, uint32_t(RejectReason::TRANSPORT));
+    return false;
   }
-  this->write_array(d, n);
-  // flush() waits for the last stop bit to leave the shifter, so the driver is
-  // never released mid-byte.
-  auto result = this->flush();
-  if (direction_pin_ != nullptr)
-    direction_pin_->digital_write(false);
   if (selftest || engine_.tx_cause() != TxCause::IDLE || engine_.trace_write()) {
     engine_.events().record(EventKind::UART_RETURN, n >= 5 ? d[2] : 0,
         n >= 5 ? (uint16_t(d[3]) << 8) | d[4] : 0,
@@ -222,24 +284,32 @@ bool BalboaSpa::bus_write_(const uint8_t *d, size_t n, bool selftest) {
     last_tx_channel_ = d[2];
     last_tx_type_ = (uint16_t(d[3]) << 8) | d[4];
   }
-  return result == uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS &&
-      (uart_component_ == nullptr || !uart_component_->is_failed());
+  return ok;
 }
 
-void BalboaSpa::publish_state_snapshot_() {
+void BalboaSpa::publish_command_response_(const char *request, const char *command,
+                                          const char *value, uint8_t index) {
+  ExecutionScope execution(boot_trace, ExecutionStage::MQTT_PUBLISH);
 #ifdef USE_MQTT
   auto *client = mqtt::global_mqtt_client;
   if (client == nullptr || !client->is_connected()) return;
-  if (state_snapshot_topic_.empty()) {
-    state_snapshot_topic_ = client->get_topic_prefix();
-    if (!state_snapshot_topic_.empty() && state_snapshot_topic_.back() != '/') state_snapshot_topic_ += '/';
-    state_snapshot_topic_ += "state";
+  if (status_topic_.empty()) {
+    status_topic_ = client->get_topic_prefix();
+    if (!status_topic_.empty() && status_topic_.back() != '/') status_topic_ += '/';
+    status_topic_ += "status";
   }
   const auto now = engine_.events().now();
   const SpaStatus &s = engine_.status();
-  const bool fresh = status_publication_.snapshot_fresh(s, bus_connected_, now.uptime_ms);
-  bool accepted = client->publish_json(state_snapshot_topic_, [&](JsonObject root) {
-    root["schema_version"] = 1;
+  const bool fresh = status_publication_.have_observation() && s.valid && bus_connected_ &&
+      now.uptime_ms - status_publication_.observed_ms() <= BUS_TIMEOUT_MS;
+  client->publish_json(status_topic_, [&](JsonObject root) {
+    root["schema_version"] = 2;
+    root["message"] = "COMMAND";
+    root["command"] = command;
+    root["value"] = value;
+    root["index"] = index;
+    root["phase"] = "PARSED";
+    if (request != nullptr) root["request"] = request;
     root["boot_id"] = diagnostic_boot_id_;
     root["uptime_ms"] = now.uptime_ms;
     if (now.utc_s) root["utc_s"] = now.utc_s;
@@ -280,7 +350,321 @@ void BalboaSpa::publish_state_snapshot_() {
     state["hour"] = s.hour;
     state["minute"] = s.minute;
   }, 0, false);
-  if (accepted) status_publication_.snapshot_published();
+#endif
+}
+
+bool BalboaSpa::publish_config_snapshot_() {
+#ifdef USE_MQTT
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return false;
+  if (status_topic_.empty()) {
+    status_topic_ = client->get_topic_prefix();
+    if (!status_topic_.empty() && status_topic_.back() != '/') status_topic_ += '/';
+    status_topic_ += "status";
+  }
+  const auto &info = engine_.info();
+  const auto &config = engine_.config();
+  const auto now = engine_.events().now();
+  return client->publish_json(status_topic_, [&](JsonObject root) {
+    root["schema_version"] = 2;
+    root["message"] = "CONFIG";
+    root["value"] = "SPA";
+    root["boot_id"] = diagnostic_boot_id_;
+    root["uptime_ms"] = now.uptime_ms;
+    root["info_valid"] = info.valid;
+    root["config_valid"] = config.valid;
+    if (info.valid) {
+      root["model"] = info.model;
+      root["version"] = info.version;
+    } else {
+      root["model"] = nullptr;
+      root["version"] = nullptr;
+    }
+    auto equipment = root["equipment"].to<JsonObject>();
+    auto pumps = equipment["pumps"].to<JsonArray>();
+    for (auto speed_count : config.pumps) pumps.add(speed_count);
+    auto lights = equipment["lights"].to<JsonArray>();
+    for (auto present : config.lights) lights.add(present);
+    auto aux = equipment["aux"].to<JsonArray>();
+    for (auto present : config.aux) aux.add(present);
+    equipment["blower"] = config.blower;
+    equipment["mister"] = config.mister;
+    equipment["circulation_pump"] = config.circulation_pump;
+  }, 0, false);
+#else
+  return false;
+#endif
+}
+
+void BalboaSpa::handle_mqtt_command_(const std::string &payload) {
+  if (!mqtt_command_state_) return;
+  std::istringstream input(payload);
+  std::string command;
+  input >> command;
+  std::transform(command.begin(), command.end(), command.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+
+  if (command == "STATUS") {
+    unsigned selector = 0;
+    if (!(input >> selector) || (selector != 0 && selector != 1 && selector != 2 &&
+                                  selector != 3 && selector != 5 && selector != 8)) {
+      ESP_LOGW(TAG, "Ignoring invalid MQTT STATUS selector");
+      return;
+    }
+    // STATUS JSON is for diagnostics; also refresh every HA entity topic so
+    // Home Assistant can persist the current observed values independently.
+    this->status_cb_.call();
+    this->publish_status_response_(static_cast<uint8_t>(selector));
+    return;
+  }
+
+  if (command == "DEBUG") {
+    unsigned selector = 0;
+    if (!(input >> selector) || (selector != 0 && selector != 8)) {
+      ESP_LOGW(TAG, "Ignoring invalid MQTT DEBUG selector");
+      return;
+    }
+    this->publish_debug_response_(static_cast<uint8_t>(selector));
+    return;
+  }
+
+  if (command != "LIGHT") {
+    ESP_LOGW(TAG, "Ignoring unsupported MQTT command");
+    return;
+  }
+
+  std::string token;
+  if (!(input >> token)) return;
+  int index = 1;
+  std::string desired;
+  if (token == "1" || token == "2") {
+    index = token[0] - '0';
+    if (!(input >> desired)) return;
+  } else {
+    desired = token;
+  }
+  std::transform(desired.begin(), desired.end(), desired.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  if (index < 1 || index > 2 || (desired != "ON" && desired != "OFF")) {
+    ESP_LOGW(TAG, "Ignoring invalid MQTT LIGHT command");
+    return;
+  }
+
+  const uint32_t age = millis() - last_status_ms_;
+  if (read_only_ || engine_.registration_only() || !engine_.registered() || !bus_connected_ ||
+      !engine_.status().valid || age > BUS_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "Rejecting MQTT LIGHT command without fresh registered spa state");
+    return;
+  }
+  engine_.set_light(static_cast<uint8_t>(index - 1), desired == "ON");
+  // This is an observation at command receipt, not an ACK or proof of UART delivery.
+  this->publish_command_response_(payload.c_str(), "LIGHT", desired.c_str(),
+                                  static_cast<uint8_t>(index));
+}
+
+void BalboaSpa::publish_status_response_(uint8_t selector) {
+#ifdef USE_MQTT
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return;
+  if (status_topic_.empty()) {
+    status_topic_ = client->get_topic_prefix();
+    if (!status_topic_.empty() && status_topic_.back() != '/') status_topic_ += '/';
+    status_topic_ += "status";
+  }
+
+  const auto now = engine_.events().now();
+  client->publish_json(status_topic_, [&](JsonObject root) {
+    root["schema_version"] = 2;
+    root["message"] = "STATUS";
+    root["command"] = "STATUS";
+    root["value"] = selector;
+    root["boot_id"] = diagnostic_boot_id_;
+    root["uptime_ms"] = now.uptime_ms;
+    if (now.utc_s) root["utc_s"] = now.utc_s;
+    else root["utc_s"] = nullptr;
+
+    auto status = root["status"].to<JsonObject>();
+    const bool all = selector == 0;
+    if (all || selector == 1) {
+      auto system = status["system"].to<JsonObject>();
+#ifdef USE_ESP32
+      system["reset_reason_raw"] = static_cast<int>(esp_reset_reason());
+      system["free_heap"] = esp_get_free_heap_size();
+      system["minimum_free_heap"] = esp_get_minimum_free_heap_size();
+#endif
+      system["boot_id"] = diagnostic_boot_id_;
+      system["uptime_ms"] = now.uptime_ms;
+    }
+    if (all || selector == 2) {
+      auto network = status["network"].to<JsonObject>();
+#ifdef USE_ESP32
+      wifi_ap_record_t ap{};
+      const bool connected = esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
+      network["connected"] = connected;
+      if (connected) {
+        network["rssi_dbm"] = ap.rssi;
+        network["wifi_channel"] = ap.primary;
+      } else {
+        network["rssi_dbm"] = nullptr;
+        network["wifi_channel"] = nullptr;
+      }
+#else
+      network["connected"] = nullptr;
+      network["rssi_dbm"] = nullptr;
+      network["wifi_channel"] = nullptr;
+#endif
+    }
+    if (all || selector == 3) {
+      auto mqtt_status = status["mqtt"].to<JsonObject>();
+      mqtt_status["connected"] = client->is_connected();
+    }
+    if (all || selector == 5) {
+      auto spa = status["spa"].to<JsonObject>();
+      const SpaStatus &s = engine_.status();
+      const bool fresh = status_publication_.have_observation() && s.valid && bus_connected_ &&
+          now.uptime_ms - status_publication_.observed_ms() <= BUS_TIMEOUT_MS;
+      spa["bus_connected"] = bus_connected_;
+      spa["fresh"] = fresh;
+      spa["observation_seq"] = status_publication_.observation_seq();
+      if (status_publication_.have_observation()) {
+        spa["observed_uptime_ms"] = status_publication_.observed_ms();
+        spa["status_age_ms"] = now.uptime_ms - status_publication_.observed_ms();
+      } else {
+        spa["observed_uptime_ms"] = nullptr;
+        spa["status_age_ms"] = nullptr;
+      }
+      if (!fresh) {
+        spa["state"] = nullptr;
+      } else {
+        auto state = spa["state"].to<JsonObject>();
+        if (s.current_temp_valid) state["current_temperature_c"] = spa_raw_to_celsius(s.current_temp_raw, s.temp_scale);
+        else state["current_temperature_c"] = nullptr;
+        state["target_temperature_c"] = spa_raw_to_celsius(s.target_temp_raw, s.temp_scale);
+        auto pumps = state["pumps"].to<JsonArray>();
+        for (auto speed : s.pumps) pumps.add(speed);
+        auto lights = state["lights"].to<JsonArray>();
+        for (auto on : s.lights) lights.add(on);
+        auto aux = state["aux"].to<JsonArray>();
+        for (auto on : s.aux) aux.add(on);
+        state["blower"] = s.blower;
+        state["hold"] = s.hold;
+        state["priming"] = s.priming;
+        state["heating"] = s.heating;
+        state["heating_mode_raw"] = uint8_t(s.heating_mode);
+        state["temperature_scale_raw"] = uint8_t(s.temp_scale);
+        state["temperature_range_raw"] = uint8_t(s.temp_range);
+        state["circulation_pump"] = s.circulation_pump;
+        state["mister"] = s.mister;
+        state["filter1_running"] = s.filter_running[0];
+        state["filter2_running"] = s.filter_running[1];
+        state["notification"] = s.notification;
+        state["hour"] = s.hour;
+        state["minute"] = s.minute;
+      }
+    }
+    if (all || selector == 8) {
+      auto rs485 = status["rs485"].to<JsonObject>();
+      const auto &d = engine_.diagnostics();
+      rs485["read_only"] = read_only_;
+      rs485["uart_selftest"] = uart_selftest_;
+      rs485["registered"] = engine_.registered();
+      rs485["registration_only"] = engine_.registration_only();
+      rs485["channel"] = engine_.channel();
+      rs485["rx_frames"] = engine_.frames_decoded();
+      rs485["new_client_cts"] = d.new_client_cts;
+      rs485["assignments"] = d.assignments;
+      rs485["last_assignment"] = d.last_assignment;
+      rs485["channel_adoptions"] = d.channel_adoptions;
+      rs485["channel_restores"] = d.channel_restores;
+      rs485["channel_stale"] = d.channel_stale;
+      rs485["ready"] = d.ready;
+      rs485["ready_ours"] = d.ready_ours;
+      rs485["last_ready_channel"] = d.last_ready_channel;
+      auto polls = rs485["ready_by_channel"].to<JsonObject>();
+      for (unsigned ch = 0; ch <= channel::MAX; ch++) {
+        if (d.ready_by_channel[ch] == 0) continue;
+        char key[3];
+        snprintf(key, sizeof(key), "%02X", ch);
+        polls[key] = d.ready_by_channel[ch];
+      }
+      rs485["tx_frames"] = tx_frames_;
+      rs485["tx_bytes"] = tx_bytes_;
+      if (tx_frames_ != 0 || tx_bytes_ != 0) {
+        rs485["last_tx_channel"] = last_tx_channel_;
+        rs485["last_tx_type"] = last_tx_type_;
+      } else {
+        rs485["last_tx_channel"] = nullptr;
+        rs485["last_tx_type"] = nullptr;
+      }
+    }
+  }, 0, false);
+#else
+  (void) selector;
+#endif
+}
+
+void BalboaSpa::publish_debug_response_(uint8_t selector) {
+#ifdef USE_MQTT
+  auto *client = mqtt::global_mqtt_client;
+  if (client == nullptr || !client->is_connected()) return;
+  if (status_topic_.empty()) {
+    status_topic_ = client->get_topic_prefix();
+    if (!status_topic_.empty() && status_topic_.back() != '/') status_topic_ += '/';
+    status_topic_ += "status";
+  }
+  const auto now = engine_.events().now();
+  client->publish_json(status_topic_, [&](JsonObject root) {
+    root["schema_version"] = 2;
+    root["message"] = "DEBUG";
+    root["command"] = "DEBUG";
+    root["value"] = selector;
+    root["boot_id"] = diagnostic_boot_id_;
+    root["uptime_ms"] = now.uptime_ms;
+    auto debug = root["debug"].to<JsonObject>();
+    debug["mqtt_connected"] = client->is_connected();
+    if (selector == 0) {
+#ifdef USE_ESP32
+      debug["reset_reason_raw"] = static_cast<int>(esp_reset_reason());
+      debug["free_heap"] = esp_get_free_heap_size();
+      debug["minimum_free_heap"] = esp_get_minimum_free_heap_size();
+#endif
+      debug["boot_number"] = boot_trace.boot_number;
+      debug["stage"] = boot_trace.stage;
+      debug["frame_type"] = boot_trace.frame_type;
+      debug["frame_length"] = boot_trace.length;
+      debug["fault_boot"] = boot_trace.fault_boot;
+      debug["fault_reason"] = boot_trace.fault_reason;
+      debug["fault_stage"] = boot_trace.fault_stage;
+      debug["fault_frame_type"] = boot_trace.fault_frame_type;
+      debug["fault_length"] = boot_trace.fault_length;
+      debug["transport_faulted"] = transport_write_.faulted();
+    } else {
+      const auto &events = engine_.events();
+      debug["events_enabled"] = events.enabled();
+      debug["critical_overwritten"] = events.lost();
+      debug["sample_overwritten"] = events.sample_lost();
+      debug["polls_coalesced"] = events.coalesced();
+      debug["other_frames_coalesced"] = events.other_frames_coalesced();
+      debug["pending"] = events.pending();
+      BusEvent batch[EventRecorder::BATCH_CAP];
+      const size_t count = events.peek_batch(batch, EventRecorder::BATCH_CAP);
+      auto items = debug["events"].to<JsonArray>();
+      for (size_t i = 0; i < count; i++) {
+        auto item = items.add<JsonObject>();
+        item["seq"] = batch[i].seq;
+        item["uptime_ms"] = batch[i].time.uptime_ms;
+        if (batch[i].time.utc_s) item["utc_s"] = batch[i].time.utc_s;
+        else item["utc_s"] = nullptr;
+        item["kind"] = EventRecorder::name(batch[i].kind);
+        item["channel"] = batch[i].channel;
+        item["frame_type"] = batch[i].frame_type;
+        item["detail"] = batch[i].detail;
+        item["ref"] = batch[i].ref;
+      }
+    }
+  }, 0, false);
+#else
+  (void) selector;
 #endif
 }
 

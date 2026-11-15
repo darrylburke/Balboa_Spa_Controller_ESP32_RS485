@@ -23,13 +23,13 @@ CONF_DIRECTION_PIN = "direction_pin"
 CONF_DIAGNOSTIC_EVENTS = "diagnostic_events"
 CONF_COMMAND_TTL = "command_ttl"
 CONF_REGISTRATION_ONLY = "registration_only"
-CONF_STATE_SNAPSHOT_TOPIC = "state_snapshot_topic"
+CONF_MQTT_COMMAND_STATE = "mqtt_command_state"
 
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(BalboaSpa),
-            cv.Optional(CONF_STATE_SNAPSHOT_TOPIC): cv.string_strict,
+            cv.Optional(CONF_MQTT_COMMAND_STATE, default=False): cv.boolean,
             cv.Optional(CONF_REGISTRATION_ONLY, default=False): cv.boolean,
             cv.Optional(CONF_COMMAND_TTL, default="5s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_DIAGNOSTIC_EVENTS, default=False): cv.boolean,
@@ -66,8 +66,7 @@ async def to_code(config):
     await uart.register_uart_device(var, config)
     uart_component = await cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart_health(uart_component))
-    if CONF_STATE_SNAPSHOT_TOPIC in config:
-        cg.add(var.set_state_snapshot_topic(config[CONF_STATE_SNAPSHOT_TOPIC]))
+    cg.add(var.set_mqtt_command_state(config[CONF_MQTT_COMMAND_STATE]))
     cg.add(var.set_read_only(config[CONF_READ_ONLY]))
     cg.add(var.set_uart_selftest(config[CONF_UART_SELFTEST]))
     cg.add(var.set_registration_only(config[CONF_REGISTRATION_ONLY]))

@@ -7,6 +7,7 @@ import os
 import sys
 
 TOPICS = {
+    "balboa/waveshare/status",
     "balboa/waveshare/diagnostics/rs485",
     "balboa/waveshare/diagnostics/rs485/events/v1",
 }
@@ -20,7 +21,16 @@ def parse_record(line, received_utc=None):
     if topic not in TOPICS:
         raise ValueError("unexpected topic")
     data = json.loads(payload)
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict):
+        raise ValueError("unsupported schema")
+    if topic == "balboa/waveshare/status":
+        status = data.get("status")
+        rs485 = status.get("rs485") if isinstance(status, dict) else None
+        if (data.get("schema_version") != 2 or data.get("message") != "STATUS" or
+                data.get("command") != "STATUS" or data.get("value") != 8 or
+                not isinstance(rs485, dict)):
+            raise ValueError("not a STATUS 8 response")
+    elif data.get("schema_version") != 1:
         raise ValueError("unsupported schema")
     if topic.endswith("events/v1"):
         events = data.get("events")

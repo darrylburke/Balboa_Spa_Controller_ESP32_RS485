@@ -79,11 +79,11 @@ Protocol reverse-engineering from ccutrer's `balboa_worldwide_app` gem.
 
 ### RS485 diagnostics
 
-To publish a non-retained MQTT snapshot every 30 seconds, include
-`packages/rs485_diagnostics.yaml` under `packages` in a configuration with
-`balboa_spa` ID `spa` and MQTT configured. Keep `read_only: true` and
-`uart_selftest: false` for passive monitoring. The package does not change either
-setting. The default topic is `balboa/waveshare/diagnostics/rs485`; edit it if needed.
+The preserved passive configuration uses `packages/rs485_diagnostics.yaml` to
+publish a non-retained schema-v1 snapshot every 30 seconds. The package does not
+change `read_only` or `uart_selftest`. The active control schema retires that
+periodic topic: request `STATUS 8` to receive RS-485 counters in the typed
+`balboa/waveshare/status` response. The active candidate omits the legacy package.
 
 Counters are cumulative since boot (uint32, wrapping), not rates. `assignments`
 counts all observed assignment broadcasts; `last_assignment` is the raw assigned
@@ -136,12 +136,14 @@ See [readiness and patch checklist](docs/offline-readiness.md),
 [bounded event provenance](docs/rs485-provenance.md),
 [command lifecycle findings](docs/command-lifecycle.md), and
 [the staged commissioning/rollback procedure](docs/bp200g1-commissioning.md).
-The optional versioned event package preserves the original diagnostic topic.
+The preserved passive rollback still has the legacy diagnostics publisher. The active
+control candidate omits that periodic topic and exposes its counters through `STATUS 8`.
 No offline test result establishes physical coexistence or authorizes transmission.
 
 
-Observed Jets/Light changes notify existing MQTT entities immediately. A separate
-non-retained `<mqtt topic_prefix>/state` snapshot publishes observed state around
-every 10 seconds, with explicit freshness and observation age. It never waits for
-that timer to notify changed entities. See [the publication audit](docs/status-publication-audit.md)
-for source/test evidence and the unmeasured one-second HA delivery target.
+Observed entity changes publish plain, non-retained values on each HA entity's
+`/state` topic, with a 30-second refresh while valid spa status arrives. Typed JSON
+diagnostics publish on `<mqtt topic_prefix>/status` only in response to commands;
+retained online/offline availability uses `/availability`. See
+[the MQTT schema](docs/mqtt-command-state-schema.md) and
+[the historical publication audit](docs/status-publication-audit.md).

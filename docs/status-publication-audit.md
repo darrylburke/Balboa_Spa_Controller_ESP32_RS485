@@ -1,4 +1,10 @@
-# Observed status publication audit
+# Historical observed status publication audit
+
+> Historical audit of the earlier snapshot implementation. Its conclusions about
+> a consolidated 10-second `/state` JSON snapshot and 60-second entity refresh are
+> superseded by MQTT schema v2: per-entity plain `/state` values publish on change
+> and every 30 seconds, and typed JSON is on-demand on `/status`. See
+> [the current schema](mqtt-command-state-schema.md).
 
 Starting point: `engineering/offline-commissioning`, commit `0ef5901`.
 No flash, active mode, bus traffic or live-service change was performed.

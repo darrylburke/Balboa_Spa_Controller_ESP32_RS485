@@ -1,8 +1,10 @@
 # Optional RS485 provenance v1
 
 Include `packages/rs485_events.yaml` alongside a component ID `spa` and MQTT. It
-sets only `diagnostic_events: true`. The existing non-retained 30-second topic
-`balboa/waveshare/diagnostics/rs485` and its fields are unchanged. The optional
+sets only `diagnostic_events: true`. The active control schema retires the
+periodic `balboa/waveshare/diagnostics/rs485` topic; request `STATUS 8` for
+counters on `balboa/waveshare/status`. The preserved passive rollback still
+publishes the legacy schema-v1 topic. The optional
 non-retained topic `balboa/waveshare/diagnostics/rs485/events/v1` publishes at most
 16 events per 5 seconds, including empty snapshots for clock/liveness observation.
 
@@ -26,8 +28,25 @@ omissions. `critical_overwritten` and `sample_overwritten` count ring overflow;
 records. This is bounded evidence, not a lossless bus capture. Instrumentation
 has a finite CPU cost; hardware response timing remains to be measured.
 
-Events are drained during publication. Broker disconnects, rejected publishes,
-QoS/network loss, reset, or overflow can lose evidence; sequence gaps and receiver
+Optional samples apply backpressure when their ring is full: a gateway READY
+sample reserves three slots for READY/UART/WRITE_RETURN together. Other-channel
+samples leave those slots available even when many stale controller allocations
+are still polled. Omitted polls increase `polls_coalesced` without allocating an
+event sequence number. Mandatory
+registered replies still run on every applicable poll. Other-client BF11
+observations are sampled at most once per channel per five seconds and counted
+separately in `other_frames_coalesced` when omitted. They use the sample ring so
+busy external traffic cannot evict the join handshake. Same-item queue cancellation
+still examines every received frame; any resulting QUEUE_RETIRED remains critical.
+Sampling can omit different item codes on the same channel in that interval.
+
+The publisher does not build or drain an event batch while disconnected. It
+stages at most 16 records without consuming them and removes that exact prefix
+only after MQTT accepts the serialized batch for sending. A rejected outbound
+enqueue leaves it for the next normal five-second publication; it does not retry
+any spa frame. Acceptance by the local async queue is not broker acknowledgement
+or wire delivery. Broker disconnects after admission, QoS/network loss, reset, or
+overflow can still lose evidence; sequence gaps and receiver
 receipt gaps matter. Do not pass commissioning gates using an incomplete trace.
 The collector must preserve topic, full payload, and receipt UTC, not flatten away
 boot/sequence/outcome fields. Existing MQTT status telemetry remains available.
@@ -50,7 +69,7 @@ bytes, e.g. `0xBF03`; only the assigned-channel field identifies the channel.
 | QUEUE_CLEARED | detail=number discarded; ref=reason |
 | QUEUED | detail=frame length; seq is local command/frame reference |
 | QUEUE_RETIRED | detail=1 after successful local send; CONFLICT reason after panel cancellation; ref=queued seq |
-| OTHER_TOGGLE | Observed other-client item toggle; detail=item code; not authenticated TP500 identity |
+| OTHER_TOGGLE | Sampled observed other-client BF11 item frame; detail=raw item code, with no authenticated TP500 identity or guarantee the code actuates anything |
 | QUEUE_EXPIRED | detail=local TTL in ms; ref=queued seq; no retry |
 | READY | Sampled observed poll; detail=payload length; seq links idle response |
 | WRITE_RETURN | Local callback returned; detail=`cause<<16 | ok`; ref=request/poll/queue |
@@ -61,6 +80,9 @@ TxCause: NONE=0, REQUEST=1, ACK=2, IDLE=3, QUEUE=4, SELFTEST=5. UART_RETURN deta
 ESPHome 2026.10.2 flush results: success=0, timeout=1, failed=2, assumed-success=3.
 The ESP32 checked callback accepts only success and a healthy UART component.
 The final transport also blocks self-test writes in read-only or registration-only mode.
+It checks nonblocking buffer capacity before enabling the driver, applies a local
+100 ms IDF drain limit, and latches further writes off after a transport fault.
+See [transport liveness](transport-liveness.md) for the assumptions and limits.
 Legacy `set_write_fn` callbacks do not provide this result and must not be treated
 as equivalent evidence. `WRITE_RETURN.ok` for those means callback return only.
 

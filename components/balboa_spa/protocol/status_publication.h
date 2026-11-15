@@ -8,8 +8,7 @@ namespace balboa_spa {
 // Presentation policy only; never used by negotiation, queues or UART timing.
 class StatusPublication {
  public:
-  static constexpr uint32_t ENTITY_REFRESH_MS = 60000;
-  static constexpr uint32_t SNAPSHOT_MS = 10000;
+  static constexpr uint32_t ENTITY_REFRESH_MS = 30000;
 
   bool observe(const SpaStatus &s, uint64_t now) {
     if (!s.valid) return false;
@@ -24,11 +23,6 @@ class StatusPublication {
     }
     return false;
   }
-  bool snapshot_fresh(const SpaStatus &s, bool bus_connected, uint64_t now) const {
-    return have_observation_ && s.valid && bus_connected &&
-        observation_seq_ != snapshot_seq_ && now - observed_ms_ <= SNAPSHOT_MS;
-  }
-  void snapshot_published() { snapshot_seq_ = observation_seq_; }
   bool have_observation() const { return have_observation_; }
   uint64_t observed_ms() const { return observed_ms_; }
   uint32_t observation_seq() const { return observation_seq_; }
@@ -53,7 +47,7 @@ class StatusPublication {
   SpaStatus notified_{};
   bool have_notification_ = false, have_observation_ = false;
   uint64_t notified_ms_ = 0, observed_ms_ = 0;
-  uint32_t observation_seq_ = 0, snapshot_seq_ = 0;
+  uint32_t observation_seq_ = 0;
 };
 
 }  // namespace balboa_spa
