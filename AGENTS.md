@@ -12,8 +12,10 @@ is an acceptance plan, not proof that a gate passed.
 - Before any build verify `.esphome/passive-baseline/SHA256SUMS` and the baseline
   hashes in `.esphome/coexistence-review/baseline-hashes.json`. Build only outside
   `.esphome/build/waveshare-balboa` using `ESPHOME_BUILD_PATH`.
-- A restored channel or READY is not ownership. Preserve registration correlation,
-  fail-closed handling, mandatory registered replies, and queue epoch invalidation.
+- A restored channel or READY is not ownership. Fresh correlated registration is
+  the default; `resume_saved_channel` is an explicit hardware-profile opt-in and
+  does not prove ownership. Preserve fail-closed handling, mandatory registered
+  replies, and queue epoch invalidation.
 - Do not invent registration identity guarantees, ACKs, or response timings.
   Same-hash/delayed assignment ambiguity needs measured evidence.
 - No unbounded per-frame MQTT/logging. Existing `diagnostics/rs485` schema stays

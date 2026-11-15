@@ -179,6 +179,47 @@ TEST(engine_restored_channel_is_observation_only_until_fresh_registration) {
   CHECK(sink.writes.back() == hexb("7e 05 11 bf 07 30 7e"));
 }
 
+TEST(engine_explicit_saved_channel_resume_is_opt_in) {
+  ProtocolEngine fresh;
+  fresh.restore_channel(0x11);
+  CHECK(!fresh.registered());
+
+  ProtocolEngine resumed;
+  Sink sink;
+  resumed.set_checked_write_fn([&](const uint8_t *p, size_t n) { sink(p, n); return true; });
+  resumed.events().set_enabled(true);
+  resumed.set_resume_saved_channel(true);
+  resumed.restore_channel(0x11);
+  CHECK(resumed.registered());
+  feed_hex(resumed, READY_OURS);
+  CHECK_EQ(sink.writes.size(), 1u);
+  CHECK(sink.writes.back() == hexb("7e 05 11 bf 07 30 7e"));
+
+  bool resume_event = false;
+  BusEvent event{};
+  while (resumed.events().pop(event)) {
+    if (event.kind == EventKind::RESUME) {
+      resume_event = true;
+      CHECK_EQ(event.channel, 0x11);
+    }
+  }
+  CHECK(resume_event);
+}
+
+TEST(engine_saved_channel_resume_never_overrides_passive_or_registration_only) {
+  ProtocolEngine passive;
+  passive.set_resume_saved_channel(true);
+  passive.set_read_only(true);
+  passive.restore_channel(0x11);
+  CHECK(!passive.registered());
+
+  ProtocolEngine registration_only;
+  registration_only.set_resume_saved_channel(true);
+  registration_only.set_registration_only(true);
+  registration_only.restore_channel(0x11);
+  CHECK(!registration_only.registered());
+}
+
 TEST(engine_fresh_assignment_replacing_saved_channel_reports_possible_leak) {
   ProtocolEngine e;
   uint8_t warned_saved = 0, warned_new = 0;

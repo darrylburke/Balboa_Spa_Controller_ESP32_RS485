@@ -1,8 +1,16 @@
 # Gateway channel ownership
 
-A persisted address is not ownership. `registered()` requires a fresh
-correlated registration exchange; a saved topside address cannot authorize
-gateway replies or queued commands in the topside's polling windows.
+A persisted address is not proof of ownership. By default, `registered()`
+requires a fresh correlated registration exchange; a saved topside address
+cannot authorize replies or queued commands in the topside's polling windows.
+`resume_saved_channel: true` is an explicit YAML opt-in for a hardware profile
+whose saved-channel behavior has been validated. It resumes without a handshake
+and is not ownership verification.
+
+```yaml
+balboa_spa:
+  resume_saved_channel: true  # default: false
+```
 
 ## Source and ambiguity
 
@@ -45,12 +53,19 @@ gateway-only reboot. Repeated gateway-only reboots can exhaust the 32 slots
 (`10`–`2F`). The earlier hardware result is not refuted; the protocol provides
 no identity proof that resolves both cases. A later opt-in resume trial is
 recorded in [commissioning notes](bp200g1-commissioning.md); panel buttons
-responded after the gateway was returned to fresh registration. Channel resume
-stays disabled until a safe ownership check is supported by evidence.
+responded after the gateway was returned to fresh registration. Resume remains
+an explicit risk choice, not a verified ownership check, and stays disabled on
+the BP200G1/TP500 target pending direction-aware evidence.
 When a fresh assignment replaces a saved address, the gateway logs a warning
 and records `POSSIBLE_CHANNEL_LEAK` in optional RS-485 provenance. This is a
 possible-leak alert: the protocol cannot report whether the old slot remains
 allocated.
+
+The YAML option is deliberately static: runtime pack-model telemetry arrives
+after channel registration and cannot safely select pre-registration behavior.
+Keep the default (`false`) unless the configured pack/panel profile has evidence
+for resume. The maintainer's CNBP501X result does not validate resume on the
+BP200G1/TP500 target.
 
 ## Queue and polling rules
 

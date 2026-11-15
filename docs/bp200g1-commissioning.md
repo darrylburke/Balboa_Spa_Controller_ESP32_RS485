@@ -25,8 +25,10 @@ prove registration ownership, controller receipt, or repeatable coexistence. See
 [`PROJECT_STATE.md`](../PROJECT_STATE.md) for the handoff.
 
 The gateway was returned to v11 (`2026.11.15.25`) via OTA. Keep saved-channel
-resume disabled on this BP200G1/TP500 installation unless a future test explains
-the Jets failure and verifies ownership on the bus.
+resume disabled (`resume_saved_channel` defaults to `false`) on this BP200G1/TP500
+installation unless a future test explains the Jets failure and evaluates panel
+coexistence on the bus. The option is selected statically in YAML; runtime pack
+identity arrives too late to choose pre-registration behavior.
 
 ## Before any approved hardware work
 

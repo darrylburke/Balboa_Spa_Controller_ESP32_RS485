@@ -51,16 +51,21 @@ void BalboaSpa::setup() {
   engine_.set_read_only(read_only_);
   engine_.set_checked_write_fn([this](const uint8_t *d, size_t n) { return this->bus_write_(d, n); });
 
-  // Load the previous address for diagnostics, never as proof of ownership.
-  // Active operation must register again before responding to any channel poll.
+  // Load the previous address. By default it is diagnostic only and active
+  // operation must register again; a validated hardware profile may opt in to
+  // resuming it through the explicit YAML setting.
   this->channel_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("balboa_spa_channel"));
   uint8_t saved = 0;
   if (this->channel_pref_.load(&saved)) {
     engine_.restore_channel(saved);
-    if (engine_.channel() == saved && saved != channel::UNASSIGNED)
-      ESP_LOGI(TAG, "Saved bus channel 0x%02X (unverified; fresh registration required)", saved);
-    else
+    if (engine_.channel() == saved && saved != channel::UNASSIGNED) {
+      if (engine_.registered())
+        ESP_LOGW(TAG, "Resuming configured saved bus channel 0x%02X without revalidation", saved);
+      else
+        ESP_LOGI(TAG, "Saved bus channel 0x%02X (unverified; fresh registration required)", saved);
+    } else {
       ESP_LOGW(TAG, "Saved bus channel 0x%02X is invalid; will negotiate a new one", saved);
+    }
   }
   engine_.on_channel_assigned = [this](uint8_t ch) {
     ESP_LOGI(TAG, "Controller assigned bus channel 0x%02X (persisting)", ch);

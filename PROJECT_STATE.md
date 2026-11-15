@@ -25,8 +25,10 @@ Updated 2026-11-15. Read this first when continuing work.
 
 ## Design decisions
 
-- TX requires fresh correlated registration. This avoids trusting a saved slot
-  after a possible spa reset, but can leak one slot on gateway-only reboot.
+- Fresh correlated registration is the default TX policy. The explicit YAML
+  `resume_saved_channel` opt-in can resume a stored slot for a validated hardware
+  profile, but does not prove ownership and may conflict after a spa reset.
+  Fresh registration can leak one slot on gateway-only reboot.
   Upstream commit `75c6055` reports hardware-verified resume and measured latency
   degradation after five leaked slots. The v26 field comparison supports keeping
   resume disabled on this BP200G1/TP500 installation. See `docs/channel-ownership.md`

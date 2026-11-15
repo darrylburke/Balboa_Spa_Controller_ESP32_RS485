@@ -24,6 +24,7 @@ CONF_DIAGNOSTIC_EVENTS = "diagnostic_events"
 CONF_COMMAND_TTL = "command_ttl"
 CONF_REGISTRATION_ONLY = "registration_only"
 CONF_MQTT_COMMAND_STATE = "mqtt_command_state"
+CONF_RESUME_SAVED_CHANNEL = "resume_saved_channel"
 
 CONFIG_SCHEMA = (
     cv.Schema(
@@ -31,6 +32,9 @@ CONFIG_SCHEMA = (
             cv.GenerateID(): cv.declare_id(BalboaSpa),
             cv.Optional(CONF_MQTT_COMMAND_STATE, default=False): cv.boolean,
             cv.Optional(CONF_REGISTRATION_ONLY, default=False): cv.boolean,
+            # Opt-in for a hardware profile where saved-channel resume has been
+            # verified. Runtime spa model telemetry arrives after registration.
+            cv.Optional(CONF_RESUME_SAVED_CHANNEL, default=False): cv.boolean,
             cv.Optional(CONF_COMMAND_TTL, default="5s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_DIAGNOSTIC_EVENTS, default=False): cv.boolean,
             cv.Optional(CONF_READ_ONLY, default=True): cv.boolean,
@@ -70,6 +74,7 @@ async def to_code(config):
     cg.add(var.set_read_only(config[CONF_READ_ONLY]))
     cg.add(var.set_uart_selftest(config[CONF_UART_SELFTEST]))
     cg.add(var.set_registration_only(config[CONF_REGISTRATION_ONLY]))
+    cg.add(var.set_resume_saved_channel(config[CONF_RESUME_SAVED_CHANNEL]))
     cg.add(var.set_command_ttl_ms(config[CONF_COMMAND_TTL].total_milliseconds))
     cg.add(var.set_diagnostic_events(config[CONF_DIAGNOSTIC_EVENTS]))
     if CONF_TIME_ID in config:

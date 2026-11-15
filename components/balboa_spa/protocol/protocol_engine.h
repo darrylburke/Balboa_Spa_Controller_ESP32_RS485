@@ -49,6 +49,9 @@ class ProtocolEngine {
     registration_only_ = enabled;
   }
   bool registration_only() const { return registration_only_; }
+  // Explicit profile opt-in: a saved address may be resumed without a fresh
+  // handshake. The default remains fresh correlated registration.
+  void set_resume_saved_channel(bool enabled) { resume_saved_channel_ = enabled; }
   // Local command freshness policy, not a Balboa response timing rule.
   void set_command_ttl_ms(uint32_t ttl) { command_ttl_ms_ = ttl; }
   EventRecorder &events() { return events_; }
@@ -59,8 +62,8 @@ class ProtocolEngine {
     if (ro) invalidate_ownership_(RejectReason::PASSIVE);
     read_only_ = ro;
   }
-  // Retain the saved address for observation only. A fresh correlated handshake
-  // is required before answering polls; polling alone cannot prove ownership.
+  // Retain the saved address for observation. Unless explicitly enabled for a
+  // validated hardware profile, a fresh correlated handshake is required.
   void restore_channel(uint8_t id) {
     if (id == channel::UNASSIGNED || id > channel::MAX) return;
     invalidate_ownership_();
@@ -68,6 +71,10 @@ class ProtocolEngine {
     saved_channel_candidate_ = id;
     diagnostics_.channel_restores++;
     events_.record(EventKind::RESTORE, id);
+    if (resume_saved_channel_ && !read_only_ && !registration_only_) {
+      registered_ = true;
+      events_.record(EventKind::RESUME, id);
+    }
   }
   const BusDiagnostics &diagnostics() const { return diagnostics_; }
 
@@ -167,9 +174,10 @@ class ProtocolEngine {
   WriteFn write_fn_;
   bool read_only_ = false;
   bool registration_only_ = false;
+  bool resume_saved_channel_ = false;
   bool registered_ = false;
   bool registration_pending_ = false;
-  // A saved address is observable, but is not authorization to transmit.
+  // A saved address is diagnostic-only unless the explicit resume policy is on.
   uint8_t channel_ = channel::UNASSIGNED;
   uint8_t saved_channel_candidate_ = channel::UNASSIGNED;
   bool seen_status_ = false;
