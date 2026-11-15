@@ -4,28 +4,82 @@
 #include <functional>
 #include "types.h"
 #include "frame.h"
+#include "events.h"
 #include "messages.h"   // channel:: constants used below
 
 namespace esphome {
 namespace balboa_spa {
 
+// Observations only: these never participate in protocol decisions.
+struct BusDiagnostics {
+  uint32_t new_client_cts = 0;
+  uint32_t assignments = 0;
+  uint8_t last_assignment = 0;  // raw payload, before existing channel clamping
+  uint32_t channel_adoptions = 0;
+  uint32_t channel_restores = 0;
+  uint32_t channel_stale = 0;
+  uint32_t ready = 0;
+  uint32_t ready_ours = 0;
+  uint8_t last_ready_channel = 0;
+  uint32_t ready_by_channel[channel::MAX + 1] = {};
+};
+
 class ProtocolEngine {
  public:
+  using CheckedWriteFn = std::function<bool(const uint8_t *, size_t)>;
   using WriteFn = std::function<void(const uint8_t *, size_t)>;
 
-  void set_write_fn(WriteFn fn) { write_fn_ = std::move(fn); }
-  void set_read_only(bool ro) { read_only_ = ro; }
-  // Resume a channel the controller assigned to us in an earlier session (e.g.
-  // reloaded from NVS after a reboot). The controller keeps polling a channel
-  // forever once assigned, so we can answer it directly with no handshake —
-  // verified on hardware. This is what stops every reboot leaking a new channel.
+  void set_write_fn(WriteFn fn) {
+    if (!fn) invalidate_ownership_(RejectReason::TRANSPORT);
+    registration_pending_ = false;
+    checked_write_fn_ = nullptr;
+    write_fn_ = std::move(fn);
+  }
+  void set_checked_write_fn(CheckedWriteFn fn) {
+    if (!fn) invalidate_ownership_(RejectReason::TRANSPORT);
+    registration_pending_ = false;
+    write_fn_ = nullptr;
+    checked_write_fn_ = std::move(fn);
+  }
+  void set_registration_only(bool enabled) {
+    if (enabled && q_count_) {
+      events_.record(EventKind::QUEUE_CLEARED, channel_, 0, q_count_, uint32_t(RejectReason::REGISTRATION_ONLY));
+      q_head_ = q_tail_ = q_count_ = 0;
+    }
+    registration_only_ = enabled;
+  }
+  bool registration_only() const { return registration_only_; }
+  // Explicit profile opt-in: a saved address may be resumed without a fresh
+  // handshake. The default remains fresh correlated registration.
+  void set_resume_saved_channel(bool enabled) { resume_saved_channel_ = enabled; }
+  // Local command freshness policy, not a Balboa response timing rule.
+  void set_command_ttl_ms(uint32_t ttl) { command_ttl_ms_ = ttl; }
+  EventRecorder &events() { return events_; }
+  TxCause tx_cause() const { return tx_cause_; }
+  uint32_t tx_ref() const { return tx_ref_; }
+  bool trace_write() const { return trace_write_; }
+  void set_read_only(bool ro) {
+    if (ro) invalidate_ownership_(RejectReason::PASSIVE);
+    read_only_ = ro;
+  }
+  // Retain the saved address for observation. Unless explicitly enabled for a
+  // validated hardware profile, a fresh correlated handshake is required.
   void restore_channel(uint8_t id) {
     if (id == channel::UNASSIGNED || id > channel::MAX) return;
+    invalidate_ownership_();
     channel_ = id;
+    saved_channel_candidate_ = id;
+    diagnostics_.channel_restores++;
+    events_.record(EventKind::RESTORE, id);
+    if (resume_saved_channel_ && !read_only_ && !registration_only_) {
+      registered_ = true;
+      events_.record(EventKind::RESUME, id);
+    }
   }
+  const BusDiagnostics &diagnostics() const { return diagnostics_; }
 
   uint8_t channel() const { return channel_; }
-  bool registered() const { return channel_ != channel::UNASSIGNED; }
+  bool registered() const { return registered_; }
 
   // Fired once when the controller assigns a channel via the handshake, so the
   // caller can persist it. Not fired on restore_channel().
@@ -33,6 +87,11 @@ class ProtocolEngine {
 
   // Fired when a held channel goes stale and is released (spa forgot us).
   std::function<void()> on_channel_stale;
+
+  // Fired if a fresh assignment differs from a saved channel. This signals a
+  // possible leaked slot; the protocol cannot confirm whether the old slot is
+  // still allocated.
+  std::function<void(uint8_t, uint8_t)> on_possible_channel_leak;
 
   uint8_t config_attempts() const { return config_attempts_; }
   bool gave_up_on_config() const { return config_attempts_ >= CONFIG_MAX_ATTEMPTS; }
@@ -76,7 +135,10 @@ class ProtocolEngine {
  protected:
   void process_frame(const ParsedFrame &f);
   bool pop_and_send_();
-  void send_now_(const uint8_t *frame, size_t len);   // bypasses the queue (handshake frames)
+  bool send_now_(const uint8_t *frame, size_t len, TxCause cause = TxCause::IDLE, uint32_t ref = 0);   // bypasses the queue (handshake frames)
+  void invalidate_ownership_(RejectReason cause = RejectReason::UNOWNED);
+  void cancel_item_(uint8_t item);
+  bool has_writer_() const { return bool(write_fn_) || bool(checked_write_fn_); }
   void request_channel_();
   void adopt_channel_(uint8_t id);
   void maybe_request_config_();
@@ -101,10 +163,23 @@ class ProtocolEngine {
   uint8_t queue_len_[Q_SLOTS] = {0};
   size_t q_head_ = 0, q_tail_ = 0, q_count_ = 0;
 
+  EventRecorder events_;
+  TxCause tx_cause_ = TxCause::NONE;
+  uint32_t tx_ref_ = 0, registration_ref_ = 0;
+  bool trace_write_ = true;
+  uint32_t queue_ref_[Q_SLOTS] = {};
+  uint64_t queue_at_ms_[Q_SLOTS] = {};
+  uint32_t command_ttl_ms_ = 5000;
+  CheckedWriteFn checked_write_fn_;
   WriteFn write_fn_;
   bool read_only_ = false;
-  // Starts unassigned: we stay silent until the controller gives us a channel.
+  bool registration_only_ = false;
+  bool resume_saved_channel_ = false;
+  bool registered_ = false;
+  bool registration_pending_ = false;
+  // A saved address is diagnostic-only unless the explicit resume policy is on.
   uint8_t channel_ = channel::UNASSIGNED;
+  uint8_t saved_channel_candidate_ = channel::UNASSIGNED;
   bool seen_status_ = false;
   uint8_t config_attempts_ = 0;
   uint16_t statuses_since_config_req_ = 0;
@@ -112,6 +187,7 @@ class ProtocolEngine {
   uint32_t frames_decoded_ = 0;
   uint32_t noise_bytes_ = 0;
 
+  BusDiagnostics diagnostics_;
   SpaStatus status_;
   SpaConfig config_;
   SpaInfo info_;

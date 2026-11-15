@@ -32,19 +32,18 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
-  - fan:
+  - switch:
       name: "Spa Jets"
       unique_id: balboa_spa_jets
-      state_topic: "spa/fan/spa_jets/state"
-      command_topic: "spa/fan/spa_jets/command"
-      percentage_state_topic: "spa/fan/spa_jets/speed_level/state"
-      percentage_command_topic: "spa/fan/spa_jets/speed_level/command"
-      speed_range_min: 1
-      speed_range_max: 2
+      state_topic: "spa/switch/spa_jets/state"
+      command_topic: "spa/switch/spa_jets/command"
       payload_on: "ON"
       payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      optimistic: false
       retain: false
       availability:
         - topic: "spa/status"
@@ -54,7 +53,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - switch:
       name: "Spa Light"
@@ -75,7 +74,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - switch:
       name: "Spa Hold"
@@ -96,7 +95,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - select:
       name: "Spa Heating Mode"
@@ -113,7 +112,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - select:
       name: "Spa Temperature Range"
@@ -130,7 +129,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - select:
       name: "Spa Temperature Scale"
@@ -147,7 +146,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - sensor:
       name: "Spa Current Temperature"
@@ -165,7 +164,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - sensor:
       name: "Spa Target Temperature"
@@ -183,7 +182,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - sensor:
       name: "Spa Model"
@@ -197,7 +196,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - sensor:
       name: "Spa Firmware Version"
@@ -211,7 +210,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - sensor:
       name: "Spa Notification"
@@ -225,7 +224,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - binary_sensor:
       name: "Spa Heating"
@@ -242,7 +241,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - binary_sensor:
       name: "Spa Priming"
@@ -258,7 +257,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - binary_sensor:
       name: "Spa Filter Cycle 1 Running"
@@ -275,7 +274,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - binary_sensor:
       name: "Spa Circulation Pump"
@@ -292,7 +291,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - binary_sensor:
       name: "Spa Bus Connected"
@@ -309,7 +308,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - number:
       name: "Spa Filter 1 Start Hour"
@@ -330,7 +329,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - number:
       name: "Spa Filter 1 Duration"
@@ -351,7 +350,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - button:
       name: "Spa Clear Notification"
@@ -367,7 +366,7 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"
 
   - button:
       name: "Spa Normal Operation"
@@ -383,4 +382,4 @@
         identifiers: "balboa_spa"
         name: "Balboa Spa"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1"

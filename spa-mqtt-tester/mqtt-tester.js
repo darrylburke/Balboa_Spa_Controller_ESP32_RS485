@@ -5,6 +5,7 @@
 // Credentials come from ../secrets.yaml so they live in exactly one place and
 // always match what the firmware itself uses.
 const mqtt = require('mqtt');
+const { jetsCommand, eligibleObservation } = require('./command-plan');
 const fs = require('fs');
 const path = require('path');
 const readline = require('node:readline');
@@ -93,7 +94,8 @@ function publish(topic, payload, desc) {
 }
 function actWithVerify(topic, payload, desc, check, ms = 12000) {
   publish(topic, payload, desc);
-  pending = { desc, check, deadline: Date.now() + ms };
+  pending = { desc, check, started: Date.now(), deadline: Date.now() + ms,
+    expectedTopic: topic.replace(/\/command$/, "/state") };
   setTimeout(() => {
     if (pending && pending.deadline <= Date.now()) {
       log(`✗ no confirming state for: ${pending.desc} — is the spa online and the bus connected?`);
@@ -101,15 +103,18 @@ function actWithVerify(topic, payload, desc, check, ms = 12000) {
     }
   }, ms + 250);
 }
-function checkPending() {
-  if (pending && pending.check()) { log('✓ confirmed:', pending.desc); pending = null; }
+function checkPending(topic, retained) {
+  if (eligibleObservation(pending, topic, retained, Date.now()) && pending.check()) {
+    log('✓ matching state observed (physical effect not proven):', pending.desc); pending = null;
+  }
 }
 
 // ---- actions ----
 const guard = () => {
+  if (pending) { log('· waiting for the previous action; no repeated command.'); return false; }
   if (!connected) { log('· not connected to the broker yet.'); return false; }
   if (T['status'] !== 'online') { log('· spa is OFFLINE — refusing to send (it would queue against a dead device).'); return false; }
-  if (T['binary_sensor/spa_bus_connected/state'] === 'OFF') { log('· RS-485 bus is DOWN — the gateway cannot reach the spa.'); return false; }
+  if (T['binary_sensor/spa_bus_connected/state'] !== 'ON') { log('· RS-485 bus is DOWN — the gateway cannot reach the spa.'); return false; }
   return true;
 };
 
@@ -121,14 +126,10 @@ function toggleLight() {
 function cycleJets() {
   const on = T['fan/spa_jets/state'] === 'ON';
   const lvl = parseInt(T['fan/spa_jets/speed_level/state'] || '0', 10);
-  const next = !on ? 1 : (lvl >= 2 ? 0 : lvl + 1);   // off -> low -> high -> off
-  if (next === 0) {
-    actWithVerify('fan/spa_jets/command', 'OFF', 'jets off', () => T['fan/spa_jets/state'] === 'OFF');
-  } else {
-    publish('fan/spa_jets/command', 'ON', `jets on`);
-    actWithVerify('fan/spa_jets/speed_level/command', next, `jets speed ${next}`,
-      () => T['fan/spa_jets/speed_level/state'] === String(next));
-  }
+  const action = jetsCommand(on, lvl);
+  actWithVerify(action.topic, action.payload, `jets desired level ${action.next}`,
+    () => action.next === 0 ? T['fan/spa_jets/state'] === 'OFF'
+      : T['fan/spa_jets/state'] === 'ON' && T['fan/spa_jets/speed_level/state'] === String(action.next));
 }
 function nudgeTemp(dir) {
   const cur = num(T['climate/spa/target_temperature/state']);
@@ -240,7 +241,7 @@ function onKey(str, key) {
   if (confirm) {
     const go = str && str.toLowerCase() === 'y';
     const c = confirm; confirm = null;
-    if (go) c.action(); else log('· cancelled.');
+    if (go && guard()) c.action(); else log('· cancelled.');
     return;
   }
   if (str === 'q') return quit();
@@ -276,16 +277,16 @@ client.on('connect', () => {
   help();
   renderLive();
 });
-client.on('reconnect', () => { connected = false; log('· reconnecting…'); renderLive(); });
+client.on('reconnect', () => { connected = false; pending = null; confirm = null; log('· reconnecting…'); renderLive(); });
 client.on('error', (e) => log('✗ mqtt error:', e.message));
-client.on('close', () => { connected = false; renderLive(); });
+client.on('close', () => { connected = false; pending = null; confirm = null; Object.keys(T).forEach(k => delete T[k]); renderLive(); });
 
-client.on('message', (topic, payload) => {
+client.on('message', (topic, payload, packet) => {
   counters.msgs++;
   const r = rel(topic);
   if (r === 'debug') return;                 // ESPHome log stream, too noisy
   T[r] = payload.toString();
-  checkPending();
+  checkPending(r, Boolean(packet && packet.retain));
   renderLive();
 });
 

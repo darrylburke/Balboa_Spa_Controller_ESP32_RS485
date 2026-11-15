@@ -46,8 +46,8 @@ Once such a simulator exists, wire the RS-485 A+/B- to its dongle, flash
 - command round-trips when you toggle entities.
 
 ## Stage 2 — real spa, READ ONLY
-Keep `read_only: true`. Wire to the spa. Confirm decoded values match the topside
-panel (temperature, heating, pump speed, light). Watch for CRC/parse errors.
+Keep `read_only: true` and `uart_selftest: false`. Wire to the spa. Confirm decoded
+values match the topside panel (temperature, heating, pump speed, light). Watch for CRC/parse errors.
 If you see only garbage: swap A+/B-.
 
 > In `read_only: true` the firmware is **fully passive** — it does not run the join
@@ -60,42 +60,35 @@ the receiver at all, which is wiring, not protocol. For silence, measure at the
 adapter's screw terminals themselves rather than at the connector — a wire clamped
 on insulation reads fine upstream and nothing at the terminal.
 
-## Stage 3 — real spa, CONTROL
-Set `read_only: false`, re-flash (OTA). On first join the log should show:
-```
-[balboa_spa] Controller assigned bus channel 0x11 (persisting)
-```
-Reboot and confirm it reuses that channel rather than taking a new one:
-```
-[balboa_spa] Resuming saved bus channel 0x11
-```
-That second line is the point of the persistence: the controller never reclaims a
-channel, so re-negotiating on every boot leaks one each time.
+## Stage 3 — real spa, CONTROL (requires separate approval)
 
-If the spa is power-cycled it forgets all clients. The firmware notices it is no
-longer being polled and rejoins automatically:
-```
-[balboa_spa] Bus channel went stale (no windows offered); rejoining
-```
+Keep the validated passive configuration until active commissioning is explicitly
+approved. The ownership correction has host-test coverage, not validation on the
+BP200G1/TP500 bus. The repository's hardware-confirmed notes below are for a
+different CNBP501X pack. Review [channel ownership](channel-ownership.md) and the
+[current commissioning status](bp200g1-commissioning.md) first.
 
-Then verify each control: target temp, jets (low/high), light, heating mode,
-filter cycles.
+Saved channels now log as unverified; they never authorize a response after boot.
+Fresh registration is required. After ownership is established, loss of polling
+for 30 Status broadcasts releases it and discards queued frames. No extra protocol
+messages or speculative response delays are added.
 
 ### Bus hygiene
 - Channels are assigned up to `0x2f` and are **never reclaimed** — there is no
   deregister message anywhere in the protocol. Leaked channels keep being polled
-  forever and measurably degrade the bus (observed with five dead channels:
-  Ready→response latency 1.19 ms → 14.17 ms, status rate down ~18%).
-- **A spa power cycle is the only known way to clear them.** Worth doing before a
-  first flash so the ESP32 starts on a clean bus.
-- Coexistence is fine: another client (topside panel / WiFi module) normally holds
-  `0x10`, and the controller alternates polling between it and us.
+  according to historical CNBP501X observations. Those measurements are not
+  evidence for the BP200G1/TP500.
+- Do not power-cycle the spa as routine bring-up or to force channel cleanup; it is
+  a physical intervention and does not prove the gateway has safe ownership.
+- Polling `0x10` does not establish which device owns it. Coexistence must be
+  validated on the actual controller/topside combination.
 
 ## Bench tool
 `../spa-serial-tester/` drives the same protocol from a laptop over a USB-RS485
 adapter — useful for confirming the bus and the spa's behaviour independently of
-the ESP32. It implements the same channel negotiation and can resume a previously
-assigned channel with `--channel <hex>`.
+the ESP32. It is a separate legacy implementation and has not received the gateway
+ownership correction. Its `--channel <hex>` option bypasses fresh registration;
+do not use it to validate safe channel ownership on the connected spa.
 
 ## Verified against the real spa (2026-07-26)
 - Pack **CNBP501X**, firmware **V36.0**; accessories: pump1 (2-speed) + light1.

@@ -8,6 +8,10 @@
 #include "esphome/components/time/real_time_clock.h"
 #endif
 #include "protocol/protocol_engine.h"
+#include "protocol/status_publication.h"
+#include "protocol/transport_write.h"
+#include "protocol/boot_trace.h"
+#include <string>
 
 namespace esphome {
 namespace balboa_spa {
@@ -19,17 +23,33 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   void loop() override;
   void dump_config() override;
 
-  void set_read_only(bool ro) { read_only_ = ro; }
+  void set_read_only(bool ro) { read_only_ = ro; engine_.set_read_only(ro); }
   // Bring-up only. Transmits a pattern on the UART and reports whether it reads
   // back, proving the ESP32's UART and pins independently of the RS-485 module.
   // DISCONNECT the module and jumper TX->RX before enabling: with the module
   // attached this would put bytes on a shared spa bus outside our Ready window.
   void set_uart_selftest(bool on) { uart_selftest_ = on; }
   // DE+/RE of a MAX485-style module. Held LOW (receive) except while writing.
+  void set_uart_health(Component *component) { uart_component_ = component; }
   void set_direction_pin(GPIOPin *pin) { direction_pin_ = pin; }
 #ifdef USE_TIME
   void set_time(time::RealTimeClock *rtc) { time_ = rtc; }
 #endif
+
+  void set_mqtt_command_state(bool enabled) { mqtt_command_state_ = enabled; }
+  void set_registration_only(bool enabled) { engine_.set_registration_only(enabled); }
+  void set_resume_saved_channel(bool enabled) { engine_.set_resume_saved_channel(enabled); }
+  void set_command_ttl_ms(uint32_t ttl) { engine_.set_command_ttl_ms(ttl); }
+  void set_diagnostic_events(bool enabled) { engine_.events().set_enabled(enabled); }
+  uint32_t diagnostic_boot_id() const { return diagnostic_boot_id_; }
+  const BootTrace &diagnostic_boot_trace() const;
+  bool transport_faulted() const { return transport_write_.faulted(); }
+  bool read_only() const { return read_only_; }
+  bool uart_selftest() const { return uart_selftest_; }
+  uint32_t tx_frames() const { return tx_frames_; }
+  uint32_t tx_bytes() const { return tx_bytes_; }
+  uint8_t last_tx_channel() const { return last_tx_channel_; }
+  uint16_t last_tx_type() const { return last_tx_type_; }
 
   ProtocolEngine &engine() { return engine_; }
   const SpaStatus &status() const { return engine_.status(); }
@@ -47,8 +67,20 @@ class BalboaSpa : public Component, public uart::UARTDevice {
 
  protected:
   void maybe_sync_time_();
-  void bus_write_(const uint8_t *d, size_t n);
+  void publish_command_response_(const char *request, const char *command,
+                                 const char *value, uint8_t index);
+  bool publish_config_snapshot_();
+  void handle_mqtt_command_(const std::string &payload);
+  void publish_status_response_(uint8_t selector);
+  void publish_debug_response_(uint8_t selector);
+  bool bus_write_(const uint8_t *d, size_t n, bool selftest = false);
+  TransportWrite transport_write_;
 
+  uint32_t diagnostic_boot_id_{0};
+  uint32_t tx_frames_{0};
+  uint32_t tx_bytes_{0};
+  uint8_t last_tx_channel_{0};
+  uint16_t last_tx_type_{0};
   ProtocolEngine engine_;
   CallbackManager<void()> status_cb_;
   CallbackManager<void()> config_cb_;
@@ -56,10 +88,10 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   // The spa broadcasts Status ~1/s; treat a long gap as the bus being down.
   static constexpr uint32_t BUS_TIMEOUT_MS = 15000;
   uint32_t last_status_ms_{0};
-  // Entities are re-notified only when Status changes, or this often regardless.
-  static constexpr uint32_t STATUS_REFRESH_MS = 60000;
-  SpaStatus last_published_status_{};
-  uint32_t last_status_publish_ms_{0};
+  StatusPublication status_publication_;
+  std::string status_topic_;
+  bool mqtt_command_state_{false};
+  bool config_publish_pending_{false};
   bool bus_connected_{false};
   // A healthy Balboa bus is ~1000 B/s; a floating rx pin yields tens of B/s of
   // EMI noise. Anything under this is not real traffic.
@@ -68,6 +100,7 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   uint32_t last_rx_bytes_{0};
   uint32_t last_diag_ms_{0};
   bool uart_selftest_{false};
+  Component *uart_component_{nullptr};
   GPIOPin *direction_pin_{nullptr};
   uint32_t last_selftest_ms_{0};
   uint32_t selftest_sent_{0};
@@ -78,8 +111,8 @@ class BalboaSpa : public Component, public uart::UARTDevice {
   bool discovery_logged_{false};
   uint32_t last_time_sync_{0};
   uint8_t rx_chunk_[128];
-  // Assigned bus channel, persisted across reboots. Without this every restart
-  // negotiates a NEW channel and the controller polls the old one forever.
+  // Last assigned bus channel, persisted for observation only.
+  // A saved value does not authorize transmission after reboot.
   ESPPreferenceObject channel_pref_;
 };
 

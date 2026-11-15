@@ -1,19 +1,37 @@
-# Full superset of Balboa entities. This Cambridge spa only has pump 1 (2-speed)
-# and light 1, so the others are commented out. Uncomment any that your spa's
-# discovery log (Task 12 "Detected spa" lines) reports.
+# Default one-pump/one-light entity set. Pump 1 is a switch because it is operated
+# as on/off; ON requests low speed and OFF requests stopped. Use the fan platform
+# instead when Home Assistant speed selection is needed. Uncomment other
+# equipment only after checking the pack's reported configuration.
 
 climate:
   - platform: balboa_spa
     name: "Spa"
     balboa_spa_id: spa
 
-fan:
+switch:
   - platform: balboa_spa
     balboa_spa_id: spa
     type: pump
     index: 1
-    speed_count: 2
     name: "Spa Jets"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: light
+    index: 1
+    name: "Spa Light"
+  - platform: balboa_spa
+    balboa_spa_id: spa
+    type: hold
+    name: "Spa Hold"
+
+# Alternative when speed selection is wanted instead of a switch:
+# fan:
+#   - platform: balboa_spa
+#     balboa_spa_id: spa
+#     type: pump
+#     index: 1
+#     speed_count: 2
+#     name: "Spa Jets"
   # - platform: balboa_spa   # pump 2 (multi-pump spas only)
   #   balboa_spa_id: spa
   #   type: pump
@@ -26,16 +44,6 @@ fan:
   #   speed_count: 2
   #   name: "Spa Blower"
 
-switch:
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    type: light
-    index: 1
-    name: "Spa Light"
-  - platform: balboa_spa
-    balboa_spa_id: spa
-    type: hold
-    name: "Spa Hold"
   # - platform: balboa_spa   # mister / aux not present on Cambridge
   #   balboa_spa_id: spa
   #   type: mister
@@ -92,10 +100,9 @@ binary_sensor:
     name: "Spa Filter Cycle 1 Running"
   - platform: balboa_spa
     balboa_spa_id: spa
-    # Liveness of the RS-485 link itself. All state topics are retained, and the
-    # MQTT LWT only fires if the ESP32 loses the broker — so if the spa or the
-    # wiring dies while the ESP32 stays online, every retained value would look
-    # current. Gate the UI on this, not just on {prefix}/status.
+    # Liveness of the RS-485 link itself. MQTT availability only describes the
+    # ESP32-to-broker connection; the pack or wiring can fail while MQTT stays up.
+    # Use this sensor to distinguish stale spa readings from a healthy bus.
     type: bus_connected
     name: "Spa Bus Connected"
     device_class: connectivity

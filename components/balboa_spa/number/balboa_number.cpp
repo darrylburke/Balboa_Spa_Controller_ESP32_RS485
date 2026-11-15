@@ -36,7 +36,7 @@ void BalboaNumber::control(float value) {
   }
   fc.c2_enabled = fc.c2_duration_min > 0;
   parent_->engine().update_filter_cycles(fc);
-  this->publish_state(value);
+  // Publish only from the observed controller response callback.
 }
 
 }  // namespace balboa_spa

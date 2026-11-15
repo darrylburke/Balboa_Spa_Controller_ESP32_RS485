@@ -1,0 +1,6 @@
+# Safe to compose with a passive config. This NEVER enables active transmission.
+# After separate active authorization, limits active TX to registration + idle replies.
+balboa_spa:
+  id: spa
+  registration_only: true
+  uart_selftest: false

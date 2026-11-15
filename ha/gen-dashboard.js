@@ -13,8 +13,8 @@
 const TARGETS = {
   // Device name comes from esphome friendly_name ("Hot Tub"); entities are
   // named "Spa", "Spa Light"... so HA yields hot_tub_spa, hot_tub_spa_light.
-  real: { slug: 'hot_tub_spa', title: 'Hot Tub' },
-  sim:  { slug: 'balboa_spa_simulated_spa_sim', title: 'Spa (Simulated)' },
+  real: { slug: 'hot_tub_spa', title: 'Hot Tub', jetsDomain: 'switch' },
+  sim:  { slug: 'balboa_spa_simulated_spa_sim', title: 'Spa (Simulated)', jetsDomain: 'fan' },
 };
 const which = process.argv[2] || 'sim';
 const T = TARGETS[which];
@@ -28,7 +28,7 @@ const S = process.argv[3] || T.slug;
 // HA appends _2 etc. on name collisions.
 const E = {
   climate: `climate.${S}`,
-  jets: `fan.${S}_jets`,
+  jets: `${T.jetsDomain}.${S}_jets`,
   light: `switch.${S}_light`,
   hold: `switch.${S}_hold`,
   mode: `select.${S}_heating_mode`,
@@ -57,6 +57,10 @@ const FNAME_CUR = `${T.title} Current Temperature F`;
 const FNAME_TGT = `${T.title} Target Temperature F`;
 const F_CUR = `sensor.${slug(FNAME_CUR)}`;
 const F_TGT = `sensor.${slug(FNAME_TGT)}`;
+const jetsFeatures = T.jetsDomain === 'fan'
+  ? `\n            features:
+              - type: fan-speed`
+  : '';
 
 // Jinja helper: current/target rendered in the spa's own scale, with unit.
 const disp = (ent) =>
@@ -180,9 +184,7 @@ views:
           - type: tile
             entity: ${E.jets}
             name: Jets
-            icon: mdi:chart-bubble
-            features:
-              - type: fan-speed
+            icon: mdi:chart-bubble${jetsFeatures}
           - type: tile
             entity: ${E.mode}
             name: Mode

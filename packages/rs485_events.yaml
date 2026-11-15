@@ -1,0 +1,60 @@
+# Optional versioned provenance. Include alongside a balboa_spa component id: spa.
+# Does not enable active mode, time synchronization, or UART self-test.
+balboa_spa:
+  id: spa
+  diagnostic_events: true
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          auto &e = id(spa).engine();
+          auto &r = e.events();
+          auto *client = esphome::mqtt::global_mqtt_client;
+          r.publish_batch(client != nullptr && client->is_connected(),
+              [&](const esphome::balboa_spa::BusEvent *events, size_t count) {
+            return client->publish_json("balboa/waveshare/diagnostics/rs485/events/v1", [&](JsonObject root) {
+              const auto now = r.now();
+              root["schema_version"] = 1;
+              root["boot_id"] = id(spa).diagnostic_boot_id();
+              root["uptime_ms"] = now.uptime_ms;
+              if (now.utc_s) root["utc_s"] = now.utc_s;
+              else root["utc_s"] = nullptr;
+              root["read_only"] = id(spa).read_only();
+              root["uart_selftest"] = id(spa).uart_selftest();
+              root["registered"] = e.registered();
+              root["registration_only"] = e.registration_only();
+              root["channel"] = e.channel();
+              root["status_valid"] = e.status().valid;
+              root["config_valid"] = e.config().valid;
+              if (e.status().valid) {
+                root["pump1_raw"] = e.status().pumps[0];
+                root["heating_mode_raw"] = uint8_t(e.status().heating_mode);
+                root["light1"] = e.status().lights[0];
+              } else {
+                root["pump1_raw"] = nullptr;
+                root["heating_mode_raw"] = nullptr;
+                root["light1"] = nullptr;
+              }
+              if (e.config().valid) root["pump1_capability"] = e.config().pumps[0];
+              else root["pump1_capability"] = nullptr;
+              root["critical_overwritten"] = r.lost();
+              root["sample_overwritten"] = r.sample_lost();
+              root["polls_coalesced"] = r.coalesced();
+              root["other_frames_coalesced"] = r.other_frames_coalesced();
+              auto batch = root["events"].to<JsonArray>();
+              for (size_t i = 0; i < count; i++) {
+                const auto &ev = events[i];
+                auto item = batch.add<JsonObject>();
+                item["seq"] = ev.seq;
+                item["uptime_ms"] = ev.time.uptime_ms;
+                if (ev.time.utc_s) item["utc_s"] = ev.time.utc_s;
+                else item["utc_s"] = nullptr;
+                item["kind"] = esphome::balboa_spa::EventRecorder::name(ev.kind);
+                item["channel"] = ev.channel;
+                item["frame_type"] = ev.frame_type;
+                item["detail"] = ev.detail;
+                item["ref"] = ev.ref;
+              }
+              root["pending"] = r.pending() - count;
+            }, 1, false);
+          });
