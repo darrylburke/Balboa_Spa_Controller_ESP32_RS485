@@ -12,7 +12,7 @@
 
 const TARGETS = {
   real: { prefix: 'spa',     id: 'balboa_spa',     label: 'Spa',     devName: 'Balboa Spa', model: 'BP200G1' },
-  sim:  { prefix: 'spa-sim', id: 'balboa_spa_sim', label: 'Spa Sim', devName: 'Balboa Spa (Simulated)', model: 'BP200G1 (simulated)' },
+  sim:  { prefix: 'spa-sim', id: 'balboa_spa_sim', label: 'Spa Sim', devName: 'Balboa Spa (Simulated)', model: 'CNBP501X' },
 };
 
 const which = process.argv[2] || 'real';

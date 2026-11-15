@@ -20,8 +20,12 @@ Updated 2026-11-15. Read this first when continuing work.
 
 ## Design decisions
 
-- A saved channel or READY match is not ownership. TX requires a fresh correlated
-  registration; ambiguity from same-hash clients and delayed assignments remains.
+- TX currently requires fresh correlated registration. This avoids trusting a
+  saved slot after a possible spa reset, but can leak one slot on each gateway-only
+  reboot. Upstream commit `75c6055` reports hardware-verified resume and measured
+  latency degradation after five leaked slots. The change does not refute that
+  evidence or solve channel exhaustion; see `docs/channel-ownership.md`.
+  Same-hash clients and delayed assignments remain ambiguous.
 - Toggle commands are not blindly retried or reconciled: there is no command ACK,
   and a retry can reverse an action that already happened. Queues expire and yield
   to observed panel actions, but are not a closed-loop controller.

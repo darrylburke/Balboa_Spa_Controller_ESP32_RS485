@@ -27,8 +27,23 @@ NEW_CLIENT_CTS makes a new request using the unchanged bytes. A controller retur
 nonmatching bytes may never register this gateway. A future compatibility change
 needs controller-specific evidence before relaxing this check.
 
-Fresh registration on reboot can consume another controller channel. This patch
-does not solve channel exhaustion by silently reusing an unverified address.
+## Reboot tradeoff
+
+The earlier implementation explicitly resumed the saved channel. Commit
+[`75c6055`](https://github.com/darrylburke/Balboa_Spa_Controller_ESP32_RS485/commit/75c6055)
+records hardware verification that the controller kept polling that slot after
+a gateway reboot. It also records five leaked slots increasing READY response
+latency from 1.19 ms to 14.17 ms. That evidence is not refuted by this change.
+
+This change chooses fresh correlated registration because a saved channel alone
+cannot establish that the controller has not reset and reassigned that slot.
+The cost is real: after a gateway-only reboot, the controller may continue
+polling the old slot while fresh registration consumes another one. Repeated
+gateway-only reboots can exhaust the 32 slots (`10`–`2F`). The change therefore
+does **not** prevent channel leaks; it trades that risk against transmitting
+under stale ownership after a controller reset. The protocol provides no
+identity proof that resolves both cases. A controller-specific resume rule
+needs evidence covering both gateway-only and spa/controller power cycles.
 
 ## Queue and polling rules
 
