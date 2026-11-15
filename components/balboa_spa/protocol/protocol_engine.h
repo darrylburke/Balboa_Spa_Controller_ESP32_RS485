@@ -65,10 +65,10 @@ class ProtocolEngine {
     if (id == channel::UNASSIGNED || id > channel::MAX) return;
     invalidate_ownership_();
     channel_ = id;
+    saved_channel_candidate_ = id;
     diagnostics_.channel_restores++;
     events_.record(EventKind::RESTORE, id);
   }
-
   const BusDiagnostics &diagnostics() const { return diagnostics_; }
 
   uint8_t channel() const { return channel_; }
@@ -80,6 +80,11 @@ class ProtocolEngine {
 
   // Fired when a held channel goes stale and is released (spa forgot us).
   std::function<void()> on_channel_stale;
+
+  // Fired if a fresh assignment differs from a saved channel. This signals a
+  // possible leaked slot; the protocol cannot confirm whether the old slot is
+  // still allocated.
+  std::function<void(uint8_t, uint8_t)> on_possible_channel_leak;
 
   uint8_t config_attempts() const { return config_attempts_; }
   bool gave_up_on_config() const { return config_attempts_ >= CONFIG_MAX_ATTEMPTS; }
@@ -166,6 +171,7 @@ class ProtocolEngine {
   bool registration_pending_ = false;
   // A saved address is observable, but is not authorization to transmit.
   uint8_t channel_ = channel::UNASSIGNED;
+  uint8_t saved_channel_candidate_ = channel::UNASSIGNED;
   bool seen_status_ = false;
   uint8_t config_attempts_ = 0;
   uint16_t statuses_since_config_req_ = 0;

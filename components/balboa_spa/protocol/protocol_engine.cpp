@@ -136,6 +136,13 @@ void ProtocolEngine::adopt_channel_(uint8_t id) {
     events_.record(EventKind::REJECTED, id, 0xbf02, uint32_t(RejectReason::INVALID_CHANNEL), registration_ref_);
     return;
   }
+  const uint8_t previous_channel = saved_channel_candidate_;
+  const bool replaced_saved_channel = diagnostics_.channel_restores != 0 &&
+      previous_channel >= channel::MIN && previous_channel <= channel::MAX && previous_channel != id;
+  if (replaced_saved_channel) {
+    events_.record(EventKind::POSSIBLE_CHANNEL_LEAK, previous_channel, 0xbf02, id, registration_ref_);
+    if (on_possible_channel_leak) on_possible_channel_leak(previous_channel, id);
+  }
   // Assignment consumes the pending exchange, but does not revoke a completed one.
   registration_pending_ = false;
   invalidate_ownership_();  // no frame encoded under an earlier channel may survive
@@ -143,6 +150,7 @@ void ProtocolEngine::adopt_channel_(uint8_t id) {
   size_t n = encode_id_ack(f, id);
   if (!send_now_(f, n, TxCause::ACK, registration_ref_)) return;
   channel_ = id;
+  saved_channel_candidate_ = id;
   registered_ = true;
   diagnostics_.channel_adoptions++;
   events_.record(EventKind::ACCEPTED, id, 0xbf02, 0, registration_ref_);

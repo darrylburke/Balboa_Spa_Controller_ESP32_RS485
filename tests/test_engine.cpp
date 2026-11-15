@@ -179,6 +179,48 @@ TEST(engine_restored_channel_is_observation_only_until_fresh_registration) {
   CHECK(sink.writes.back() == hexb("7e 05 11 bf 07 30 7e"));
 }
 
+TEST(engine_fresh_assignment_replacing_saved_channel_reports_possible_leak) {
+  ProtocolEngine e;
+  uint8_t warned_saved = 0, warned_new = 0;
+  e.events().set_enabled(true);
+  e.on_possible_channel_leak = [&](uint8_t saved, uint8_t assigned) {
+    warned_saved = saved;
+    warned_new = assigned;
+  };
+  e.restore_channel(0x10);
+  register_engine(e);
+  CHECK(e.registered());
+  CHECK_EQ(warned_saved, 0x10);
+  CHECK_EQ(warned_new, 0x11);
+
+  // The event points from the old saved slot to the fresh correlated assignment.
+  bool leak_event = false;
+  BusEvent event{};
+  while (e.events().pop(event)) {
+    if (event.kind == EventKind::POSSIBLE_CHANNEL_LEAK) {
+      leak_event = true;
+      CHECK_EQ(event.channel, 0x10);
+      CHECK_EQ(event.detail, 0x11);
+    }
+  }
+  CHECK(leak_event);
+}
+
+TEST(engine_same_saved_channel_assignment_does_not_raise_possible_leak_alert) {
+  ProtocolEngine e;
+  unsigned warnings = 0;
+  e.events().set_enabled(true);
+  e.on_possible_channel_leak = [&](uint8_t, uint8_t) { warnings++; };
+  e.restore_channel(0x11);
+  register_engine(e);  // correlated assignment returns the same saved address
+  CHECK(e.registered());
+  CHECK_EQ(e.channel(), 0x11);
+  CHECK_EQ(warnings, 0);
+
+  BusEvent event{};
+  while (e.events().pop(event)) CHECK(event.kind != EventKind::POSSIBLE_CHANNEL_LEAK);
+}
+
 TEST(engine_restore_rejects_invalid_channels) {
   ProtocolEngine e;
   e.restore_channel(channel::UNASSIGNED);

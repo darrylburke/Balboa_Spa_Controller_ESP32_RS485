@@ -46,37 +46,34 @@ TEST(publication_changed_jets_and_light_notify_without_wait_or_uart_tx) {
   CHECK_EQ(writes, 0);
 }
 
-TEST(publication_unchanged_frames_are_fresh_for_each_ten_second_snapshot) {
+TEST(publication_unchanged_status_refreshes_every_thirty_seconds) {
   StatusPublication p; SpaStatus s; s.valid = true;
-  CHECK_EQ(StatusPublication::SNAPSHOT_MS, 10000);
   CHECK(p.observe(s, 0));
-  for (uint64_t snapshot = 10000; snapshot <= 30000; snapshot += 10000) {
-    CHECK(!p.observe(s, snapshot - 1));
-    CHECK(p.snapshot_fresh(s, true, snapshot));
-    CHECK_EQ(p.observed_ms(), snapshot - 1);
-    p.snapshot_published();
-    CHECK(!p.snapshot_fresh(s, true, snapshot));
-  }
+  CHECK(!p.observe(s, 29999));
+  CHECK_EQ(p.observed_ms(), 29999);
+  CHECK(p.observe(s, 30000));
 }
 
-TEST(publication_never_labels_missing_or_stale_observations_fresh) {
+TEST(publication_ignores_invalid_status_and_tracks_latest_valid_observation) {
   StatusPublication p; SpaStatus s;
-  CHECK(!p.snapshot_fresh(s, true, 10000));
   CHECK(!p.observe(s, 0));
+  CHECK(!p.have_observation());
   s.valid = true; CHECK(p.observe(s, 0));
-  CHECK(!p.snapshot_fresh(s, true, 10001));
-  CHECK(!p.snapshot_fresh(s, false, 100));
-  CHECK(p.snapshot_fresh(s, true, 100)); // unsuccessful publish did not consume observation
-  p.snapshot_published();
-  CHECK(!p.snapshot_fresh(s, true, 100));
+  CHECK(p.have_observation());
+  CHECK_EQ(p.observed_ms(), 0);
+  CHECK_EQ(p.observation_seq(), 1);
+  CHECK(!p.observe(s, 100));
+  CHECK_EQ(p.observed_ms(), 100);
+  CHECK_EQ(p.observation_seq(), 2);
 }
 
 TEST(publication_preserves_unchanged_entity_refresh_and_64_bit_uptime) {
   StatusPublication p; SpaStatus s; s.valid = true;
   uint64_t start = 4294967200ULL;
   CHECK(p.observe(s, start));
-  CHECK(!p.observe(s, start + 59999));
-  CHECK(p.observe(s, start + 60000));
-  s.pumps[5] = 1; CHECK(p.observe(s, start + 60001));
-  s.lights[1] = true; CHECK(p.observe(s, start + 60002));
+  CHECK(!p.observe(s, start + 29999));
+  CHECK(p.observe(s, start + 30000));
+  CHECK(!p.observe(s, start + 30001));
+  s.pumps[5] = 1; CHECK(p.observe(s, start + 30002));
+  s.lights[1] = true; CHECK(p.observe(s, start + 30003));
 }

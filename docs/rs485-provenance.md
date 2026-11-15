@@ -58,7 +58,8 @@ bytes, e.g. `0xBF03`; only the assigned-channel field identifies the channel.
 
 | Kind | Meaning / detail / reference |
 | --- | --- |
-| RESTORE | Saved unverified address loaded; never TX authority |
+| RESTORE | Saved unverified address loaded; this event alone does not grant TX authority |
+| POSSIBLE_CHANNEL_LEAK | Fresh correlated assignment differs from the saved address; `channel`=saved address, `detail`=new address, `ref`=registration request. The protocol cannot tell whether the old slot remains allocated. |
 | INVITATION | New-client broadcast observed; detail=payload length |
 | REQUEST | Gateway request intent; detail=request hash; seq becomes request ref |
 | ASSIGNMENT | Candidate observed; detail=response hash or zero if short; ref=pending request |
@@ -86,7 +87,8 @@ See [transport liveness](transport-liveness.md) for the assumptions and limits.
 Legacy `set_write_fn` callbacks do not provide this result and must not be treated
 as equivalent evidence. `WRITE_RETURN.ok` for those means callback return only.
 
-Snapshot `registered` is internal authority, not proof of exclusive ownership.
+Snapshot `registered` is internal TX authority, not proof of exclusive
+ownership; it follows the correlated registration path.
 `status_valid/config_valid`, nullable `pump1_raw/pump1_capability/heating_mode_raw`,
 and nullable `light1` expose observed raw values, not guessed hardware capability.
 Queue references are local frame identifiers, not MQTT transaction IDs. No command

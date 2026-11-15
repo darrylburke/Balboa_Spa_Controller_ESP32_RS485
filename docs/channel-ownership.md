@@ -1,8 +1,8 @@
 # Gateway channel ownership
 
-A persisted address is observation, not ownership. `registered()` now requires a
-fresh registration exchange. This prevents a saved topside address from causing
-gateway idle replies or queued commands in the topside's polling windows.
+A persisted address is not ownership. `registered()` requires a fresh
+correlated registration exchange; a saved topside address cannot authorize
+gateway replies or queued commands in the topside's polling windows.
 
 ## Source and ambiguity
 
@@ -35,15 +35,18 @@ records hardware verification that the controller kept polling that slot after
 a gateway reboot. It also records five leaked slots increasing READY response
 latency from 1.19 ms to 14.17 ms. That evidence is not refuted by this change.
 
-This change chooses fresh correlated registration because a saved channel alone
-cannot establish that the controller has not reset and reassigned that slot.
-The cost is real: after a gateway-only reboot, the controller may continue
-polling the old slot while fresh registration consumes another one. Repeated
-gateway-only reboots can exhaust the 32 slots (`10`–`2F`). The change therefore
-does **not** prevent channel leaks; it trades that risk against transmitting
-under stale ownership after a controller reset. The protocol provides no
-identity proof that resolves both cases. A controller-specific resume rule
-needs evidence covering both gateway-only and spa/controller power cycles.
+Fresh correlated registration avoids transmitting under a saved channel after
+the controller may have reassigned it, but can consume another slot after a
+gateway-only reboot. Repeated gateway-only reboots can exhaust the 32 slots
+(`10`–`2F`). The earlier hardware result is not refuted; the protocol provides
+no identity proof that resolves both cases. A later opt-in resume trial is
+recorded in [commissioning notes](bp200g1-commissioning.md); panel buttons
+responded after the gateway was returned to fresh registration. Channel resume
+stays disabled until a safe ownership check is supported by evidence.
+When a fresh assignment replaces a saved address, the gateway logs a warning
+and records `POSSIBLE_CHANNEL_LEAK` in optional RS-485 provenance. This is a
+possible-leak alert: the protocol cannot report whether the old slot remains
+allocated.
 
 ## Queue and polling rules
 

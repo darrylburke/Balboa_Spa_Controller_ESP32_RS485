@@ -4,16 +4,29 @@
 
 On 2026-11-15 the operator reported a successful OTA of control candidate v11
 (`2026.11.15.25`), confirmed Light OFF at the spa, and reported working remote
-commands and normal TP500 operation. The final Jets HA entity is now a switch;
-its physical behavior after that discovery change has not been confirmed here.
-Normal Operation and Clear Notification button requests were followed by brief
-MQTT `offline` messages and recovery; the cause is unknown. No direction-aware
-RS-485 capture is attached to this PR, so these reports do not prove registration
-ownership, controller receipt, or repeatable coexistence. See
+commands and normal TP500 operation. The final Jets HA entity is now a switch.
+
+An opt-in saved-channel build v26 (`2026.11.15.26`) was then installed by OTA
+for a gateway-only reboot trial. The operator reported that the physical TP500
+Light button responded but Jets did not. After OTA rollback to v11 with fresh
+registration, the operator reported both physical buttons responding. This
+comparison supports the concern that resumed-channel operation can interfere
+with panel control on this installation, but does not establish cause without
+wire evidence. A 15-minute read-only MQTT observer spanning both uploads received
+no device state, availability, or RS-485 event telemetry; the OTA port remained
+reachable. Two MQTT command messages were observed, but no device state followed.
+Neither the v26 resume event nor the current v11 runtime channel was independently
+observed.
+
+Normal Operation and Clear Notification button requests were previously followed
+by brief MQTT `offline` messages and recovery; the cause is unknown. No
+direction-aware RS-485 capture is attached to this PR, so operator reports do not
+prove registration ownership, controller receipt, or repeatable coexistence. See
 [`PROJECT_STATE.md`](../PROJECT_STATE.md) for the handoff.
 
-This is a record and acceptance guide, not permission to repeat physical actions.
-The device's live state was not checked while preparing this PR.
+The gateway was returned to v11 (`2026.11.15.25`) via OTA. Keep saved-channel
+resume disabled on this BP200G1/TP500 installation unless a future test explains
+the Jets failure and verifies ownership on the bus.
 
 ## Before any approved hardware work
 
@@ -51,6 +64,17 @@ baseline. Compilation and host tests do not establish safe bus coexistence.
    The recent trial showed offline transitions after button commands; investigate
    availability retention before calling HA uptime reliable. See the
    [MQTT schema](mqtt-command-state-schema.md).
+
+## Next steps
+
+- Keep fresh correlated registration enabled; do not retry saved-channel resume
+  on this installation yet.
+- Capture gateway and TP500 direction-aware traffic during a simple panel Light
+  and Jets test. Include channel assignments, READY polls, and replies so the
+  resumed-channel failure can be attributed rather than inferred from state.
+- Restore MQTT state/availability telemetry and verify the `POSSIBLE_CHANNEL_LEAK`
+  warning on a fresh assignment that replaces a saved address. The protocol can
+  identify a possible leak, not prove that the old slot remains allocated.
 
 Do not infer pump speed capability or Ready-in-Rest behavior from the historical
 CNBP501X profile. Do not implement unattended reconciliation until command timing

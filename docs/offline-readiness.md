@@ -6,7 +6,7 @@ what code/tests establish from what still needs bus or physical evidence.
 
 | Area | Current evidence | Still unproven |
 | --- | --- | --- |
-| Channel ownership | Correlated registration and queue invalidation have host coverage. | Exclusive ownership and full request/assignment/ACK wire trace. |
+| Channel ownership | Correlated registration and queue invalidation have host coverage. A v26 resume trial was followed by reported TP500 Jets failure; after rollback to v11 fresh registration, the operator reported Jets and Light buttons working. | Exclusive ownership and full request/assignment/ACK wire trace; no MQTT telemetry arrived during the 15-minute field capture, so the resume event/channel was not independently observed. |
 | Transport | Checked writes fail closed; a fault disables further writes for that boot. | Entire-driver hard timing bound and physical bus delivery. |
 | Commands | TTL and observed-panel cancellation; no blind retry. Operator reports Light OFF and remote commands worked. | Command attribution, repeatable physical reliability, final Jets switch behavior. |
 | MQTT / HA | Schema v2 documented; obsolete fan and extra Jets Power discovery records were cleared. | Cause of offline transitions after button commands; current retained availability correctness. |

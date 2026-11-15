@@ -73,6 +73,10 @@ void BalboaSpa::setup() {
     uint8_t none = 0;
     this->channel_pref_.save(&none);
   };
+  engine_.on_possible_channel_leak = [](uint8_t saved, uint8_t assigned) {
+    ESP_LOGW(TAG, "Possible channel leak: saved slot 0x%02X replaced by 0x%02X; the controller may still poll the saved slot",
+        saved, assigned);
+  };
   engine_.on_status_update = [this]() {
     boot_trace.mark(ExecutionStage::STATUS_CALLBACK);
     this->last_status_ms_ = millis();
