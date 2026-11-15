@@ -1,149 +1,49 @@
-# balboa-esp32-mqtt
+# Balboa ESP32 MQTT gateway
 
-ESPHome firmware bridging a Balboa-powered spa to MQTT (with Home Assistant
-auto-discovery) over RS-485, using an ESP32 + HW-0519 auto-direction MAX485 module.
-A C++ re-implementation of the `balboa_worldwide_app` protocol, unit-tested on host.
+ESPHome firmware that reads and controls Balboa spa packs over RS-485, publishes
+Home Assistant entities through MQTT, and implements the Balboa protocol in C++.
 
-## Quick start
-1. `cp secrets.yaml.example secrets.yaml` and fill in WiFi/MQTT/OTA.
-2. Wire per `docs/wiring.md`.
-3. `make test` — run protocol unit tests.
-4. `esphome run balboa-spa.yaml` — flash (starts in `read_only: true`).
-5. Follow `docs/bring-up.md` stages; flip `read_only: false` once decode is verified.
+## Start here
 
-## Layout
-- `components/balboa_spa/protocol/` — host-testable protocol library.
-- `components/balboa_spa/` — ESPHome hub + entity platforms.
-- `spa-serial-tester/` — Node bench CLI driving the same protocol from a laptop
-  over a USB-RS485 adapter. This is where the protocol was actually proven against
-  the real spa; useful for confirming the bus independently of the ESP32.
-  See its own README.
-- `spa-android/` — Kotlin/Compose phone app that monitors and controls the spa
-  through this gateway's MQTT topics. See its own README.
-- `balboa-spa.yaml` / `packages/` — device config (tailored to a Canadian Spa Co.
-  Cambridge: 1× 2-speed pump, 1× light; superset commented for other spas).
-- `docs/` — wiring, bring-up, and the design spec.
+1. Read [the engineering constraints](AGENTS.md) and
+   [current project state](PROJECT_STATE.md).
+2. Copy `secrets.yaml.example` to `secrets.yaml` and fill in local credentials.
+3. Run the offline checks listed in `AGENTS.md`.
+4. Review [bring-up](docs/bring-up.md) and the
+   [BP200G1 commissioning and rollback guide](docs/bp200g1-commissioning.md)
+   before any hardware action. A successful compile or test does not authorize a
+   flash or prove safe bus coexistence.
 
-## Bus addressing (important)
-The RS-485 bus is shared and **addressed**. A client must ask the controller for a
-channel and may then transmit *only* in a Ready addressed to that channel:
+The tracked `balboa-spa.yaml` is a legacy ESP32-C3 configuration, not the local
+Waveshare ESP32-S3 profile used with the BP200G1/TP500. Device-specific YAML,
+secrets, rollback images, and capture files are local and must not be committed.
 
-```
-controller → FE BF 00           "any new clients?"
-client     → FE BF 01 02 F1 73  ID request
-controller → FE BF 02 <id> F1 73  correlated assignment (0x10–0x2f)
-client     → <id> BF 03         ack
-then: transmit only on <id> BF 06, as src <id>; send <id> BF 07 when idle
-```
+## Important behavior
 
-Never hardcode an address. Another client (the topside panel or a WiFi module)
-already holds one — typically `0x10` — and answers *every* one of its Ready
-windows, so a hardcoded client transmits on top of it and both frames are lost.
+The RS-485 bus is shared. A saved address or a matching READY frame is not proof
+of ownership. Transmission requires a fresh correlated registration; see
+[channel ownership](docs/channel-ownership.md). Commands use Balboa toggles with
+no transaction ACK, so the gateway expires queued actions and does not blindly
+retry or reconcile them; see [command lifecycle](docs/command-lifecycle.md).
 
-A saved channel is retained for diagnostics only. It does not mark the engine
-registered or permit idle replies, configuration requests, or commands. Active
-registration requires an actually transmitted request, a full assignment response
-with matching request hash bytes, and the existing ID_ACK. No new acknowledgement
-message or timing delay is introduced. See [ownership limits](docs/channel-ownership.md)
-before considering active commissioning; this correction is not hardware validation.
+MQTT schema v2 sends plain per-entity state for Home Assistant and on-demand typed
+JSON on `/status`. See the [MQTT schema](docs/mqtt-command-state-schema.md).
+Passive diagnostics keep their existing schema; bounded event provenance is
+documented in [RS-485 provenance](docs/rs485-provenance.md).
 
-Commands submitted while passive or unregistered are discarded. Queued frames are
-invalidated on ownership loss, restoration, and fresh assignment, so frames encoded
-with an earlier channel cannot survive re-registration. Legitimately registered
-clients still send one queued frame or the required idle reply on each matching poll.
+The default real-spa package exposes pump 1 as the `Spa Jets` on/off switch: ON
+requests low speed and OFF requests stopped. This gives HA a state-backed on/off
+control instead of presenting pump speed as a fan control. Choose the fan platform
+when speed selection is wanted. This is an entity choice, not a claim that every
+pack has the same pump capability.
 
-## Temperature units
-**Everything published is Celsius**, regardless of the spa's own scale setting —
-the climate entity and both temperature sensors agree. Conversion happens only at
-the protocol boundary (`spa_raw_to_celsius` / `celsius_to_spa_raw`).
+## Repository layout
 
-This matters because an entity's `unit_of_measurement` is fixed at compile time
-while the spa's scale can be changed at runtime (including via
-`select/spa_temperature_scale`). Publishing the spa's native scale therefore
-produced Celsius values labelled `°F` as soon as anyone flipped the setting — and
-with `device_class: temperature`, Home Assistant would then "convert" them again.
+- `components/balboa_spa/` — ESPHome component and protocol implementation.
+- `packages/` — reusable entity and diagnostics packages.
+- `tests/` — offline C++, JavaScript, and Python tests.
+- `spa-serial-tester/`, `spa-mqtt-tester/`, `spa-simulator/` — protocol tools;
+  do not use live tester entrypoints as tests.
+- `docs/` — design rationale, commissioning gates, MQTT schema, and recovery.
 
-`spa_raw_to_native()` still exists for display/diagnostics, but must never back an
-entity. Front-ends that want °F should read `select/spa_temperature_scale/state`
-and convert, or let Home Assistant do it via `device_class: temperature`.
-
-## Notes
-- Cycle-2 filter is auto-enabled when its duration > 0 (no separate enable entity).
-- `read_only: true` suppresses protocol writes. Keep `uart_selftest: false` too;
-  the final UART guard also blocks self-test writes in read-only mode.
-- Heating mode is a sparse encoding — Ready-in-Rest is **3**, not 2.
-- Requires a recent ESPHome (uses `climate_schema()`); see `docs/bring-up.md`.
-
-## Credits
-Protocol reverse-engineering from ccutrer's `balboa_worldwide_app` gem.
-
-### RS485 diagnostics
-
-The preserved passive configuration uses `packages/rs485_diagnostics.yaml` to
-publish a non-retained schema-v1 snapshot every 30 seconds. The package does not
-change `read_only` or `uart_selftest`. The active control schema retires that
-periodic topic: request `STATUS 8` to receive RS-485 counters in the typed
-`balboa/waveshare/status` response. The active candidate omits the legacy package.
-
-Counters are cumulative since boot (uint32, wrapping), not rates. `assignments`
-counts all observed assignment broadcasts; `last_assignment` is the raw assigned
-byte, while `channel` is the engine's current channel (0 means unassigned).
-`channel_adoptions`, `channel_restores`, and `channel_stale` distinguish correlated
-registration, saved-address observation, and release of registered ownership.
-Adoption is counted only after the ID_ACK write callback returns. Restoration
-never establishes ownership; passive assignment broadcasts remain observations.
-
-`ready` counts all polling windows, `ready_ours` counts those matching our current
-internal channel (even in passive mode), and `ready_by_channel` gives nonzero counts keyed by hexadecimal channel
-(00–2F). Windows outside that range still count in `ready` and appear in
-`last_ready_channel`. Other channel fields are decimal numbers.
-
-`tx_frames` and `tx_bytes` count completed UART write/flush calls, including the
-optional UART self-test, rather than queued commands or attempted transmissions.
-`last_tx_channel` and `last_tx_type` report bytes 2 and 3–4 of the last write
-(type packed as a 16-bit number); they are null until a write has completed, and meaningful as protocol
-metadata only with self-test disabled. These are software observations, not proof of RS485
-wire delivery or controller acceptance. Passive operation with self-test disabled
-should leave both TX counters at zero. No per-frame MQTT publishing or logging is
-added to the bus processing path.
-
-
-For passive commissioning, check `schema_version: 1`, `read_only: true`, and
-`uart_selftest: false` in each snapshot. `rx_frames` counts decoded received
-frames, including other clients' traffic; it is independent of `tx_frames`.
-Observe several 30-second snapshots: increasing receive/poll counts with both TX
-counters at zero is the expected software evidence of receive-only operation.
-Assignments may increase without transmission; adoptions remain zero in passive
-mode. `channel` may be nonzero because a saved address was restored.
-`ready_ours` only means a poll matched that internal channel;
-it does not identify the TP500 or establish exclusive ownership. Use uptime to
-spot reboots before comparing counter deltas. Counters wrap at 2^32 and uptime
-wraps with `millis()` after about 49.7 days. This build has not been flashed or
-validated on the physical bus as part of these checks.
-
-The JSON schema has 20 fixed top-level fields and at most 48 poll-map entries.
-With compact serialization, maximum-width uint32 values and all channels present,
-the payload stays below 2 KiB. Publication runs once per 30 seconds, with a fixed
-48-iteration loop and no frame histories or growing strings. The receive path
-only increments fixed-size counters; UART counters update after flush and driver
-release. Diagnostics add no delays or protocol decisions; instrumentation and JSON
-serialization still have a small CPU cost. Ownership rules are described above.
-
-
-## Offline commissioning readiness
-
-See [readiness and patch checklist](docs/offline-readiness.md),
-[bounded event provenance](docs/rs485-provenance.md),
-[command lifecycle findings](docs/command-lifecycle.md), and
-[the staged commissioning/rollback procedure](docs/bp200g1-commissioning.md).
-The preserved passive rollback still has the legacy diagnostics publisher. The active
-control candidate omits that periodic topic and exposes its counters through `STATUS 8`.
-No offline test result establishes physical coexistence or authorizes transmission.
-
-
-Observed entity changes publish plain, non-retained values on each HA entity's
-`/state` topic, with a 30-second refresh while valid spa status arrives. Typed JSON
-diagnostics publish on `<mqtt topic_prefix>/status` only in response to commands;
-retained online/offline availability uses `/availability`. See
-[the MQTT schema](docs/mqtt-command-state-schema.md) and
-[the historical publication audit](docs/status-publication-audit.md).
+Protocol reference: [ccutrer/balboa_worldwide_app](https://github.com/ccutrer/balboa_worldwide_app).

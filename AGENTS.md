@@ -1,5 +1,10 @@
 # Balboa gateway engineering constraints
 
+Start with `PROJECT_STATE.md`, then read the relevant design note before editing.
+Keep claims tied to evidence: distinguish source behavior, offline tests, MQTT
+observations, and operator-reported physical effects. The commissioning runbook
+is an acceptance plan, not proof that a gate passed.
+
 - Never flash, reboot, transmit to the spa, enable active mode, change wiring, or
   alter live MQTT/EC2/HA services without explicit operator authorization.
 - Preserve `balboa-passive.yaml`: `read_only: true`, `uart_selftest: false`, TX17,
@@ -23,3 +28,9 @@
 - Use the requirement checklist and commissioning gates in `docs/offline-readiness.md`
   and `docs/bp200g1-commissioning.md`. Read-only local events do not prove wire
   delivery, controller acceptance, exclusive ownership, or physical execution.
+- Preserve the rationale for the safeguards: stale channels cannot identify an
+  owner; Balboa toggles have no transaction ACK, so blind retries can undo actions;
+  high-rate status/log publishing previously overwhelmed the MQTT queue. See
+  `docs/channel-ownership.md`, `docs/command-lifecycle.md`,
+  `docs/transport-liveness.md`, and `docs/mqtt-command-state-schema.md` before
+  changing those behaviors.

@@ -112,11 +112,9 @@ views:
             name: Light
             icon: mdi:lightbulb
           - type: tile
-            entity: fan.hot_tub_spa_jets
+            entity: switch.hot_tub_spa_jets
             name: Jets
             icon: mdi:chart-bubble
-            features:
-              - type: fan-speed
           - type: tile
             entity: select.hot_tub_spa_heating_mode
             name: Mode

@@ -8,7 +8,7 @@ diagnostic JSON:
 | `balboa/waveshare/command` | subscriber | Light commands and on-demand STATUS/DEBUG requests |
 | `balboa/waveshare/<component>/<entity>/state` | publisher | Plain per-entity state values for HA |
 | `balboa/waveshare/status` | publisher | Typed JSON COMMAND, CONFIG, STATUS, and DEBUG messages |
-| `balboa/waveshare/availability` | publisher | Retained plain `online`/`offline` availability for HA |
+| `balboa/waveshare/availability` | publisher | ESPHome birth/LWT availability for HA; retention is set in the device YAML |
 
 ESPHome discovery configuration is retained. Entity state values are not retained;
 HA stores received values in its own state/history database. The root `/state`
@@ -21,7 +21,7 @@ Every JSON message on `balboa/waveshare/status` has `schema_version: 2` and a
 
 | `message` | When it is published | Main contents |
 | --- | --- | --- |
-| `COMMAND` | After a supported command is parsed locally | Command, value, index, original request, and observed spa state |
+| `COMMAND` | After a supported root text command is parsed locally (currently `LIGHT`) | Command, value, index, original request, and observed spa state |
 | `CONFIG` | When spa model/equipment configuration is decoded | Model/version and reported equipment capabilities |
 | `STATUS` | Only in response to `STATUS <value>` | Requested runtime/diagnostic sections; echoes the selector |
 | `DEBUG` | In response to `DEBUG <value>` | Bounded boot/runtime details or a bounded RS-485 event batch |
@@ -35,6 +35,9 @@ message discriminator.
 
 The plain `online`/`offline` payload on `/availability` is separate from the JSON
 `STATUS` message on `/status`. Discovery configs point HA at `/availability`.
+
+This split keeps HA state simple and gives people/tools a readable diagnostic
+response without sending an aggregate JSON state on every update.
 
 ## Commands
 
@@ -53,10 +56,20 @@ guard queues no RS-485 frame.
 and heap information; `8` returns the pending bounded RS-485 event batch and loss
 counters. Debug is on demand; it is not a per-frame MQTT log stream.
 
+Example read-only request:
+
+```sh
+mosquitto_pub -h "$MQTT_BROKER" -t balboa/waveshare/command -m 'STATUS 8'
+```
+
 STATUS and DEBUG are read-only and also work in passive mode. Unsupported commands
-or selectors are ignored. Commands must not be retained. The direct control
-command is Light; existing HA command topics remain enabled for configured Jets,
-heating, and other entities.
+or selectors are ignored. Commands must not be retained. The root text command
+currently controls Light. HA entities, including buttons, Jets, and heating
+controls, use their own component command topics; they do not produce a `COMMAND`
+JSON response. A button request followed by `/availability` `offline` therefore
+does not establish whether the action ran or why MQTT disconnected. The operator
+observed recovery after Normal Operation and Clear Notification requests; the
+cause is unknown.
 
 The `Spa Jets` HA switch controls pump 1 as an on/off toggle: ON requests low speed,
 and OFF requests stopped. No separate HA fan entity is exposed for pump 1.
@@ -139,15 +152,18 @@ physical execution.
 
 Entity state, typed `/status` JSON, and commands use QoS 0 and are non-retained.
 Discovery configuration and `/availability` may be retained. The firmware
+sets birth and last-will retention in its ESPHome YAML. In the recent production
+trial, the offline last-will was retained but the online birth was not; the broker
+could therefore keep a stale `offline` value after the device reconnects. Retain
+the online birth and verify the broker's retained availability before relying on
+HA availability. The firmware
 publishes per-entity values through the bounded ESPHome MQTT queue and ESP-MQTT's
 native outbox. Queue admission is local only; it is not a broker or spa ACK. The
 standard ESPHome subscription callback does not expose the MQTT RETAIN bit, so
 command publishers must enforce the non-retained command rule. Never retry a
 toggle from a timeout; read the next fresh spa state instead.
 
-Schema v2 is opt-in through `balboa_spa: mqtt_command_state: true`. The current
-Home Assistant candidate is
-`.esphome/mqtt-paced-retry/control-ha-command-state-v11.yaml`. The preserved
+Schema v2 is opt-in through `balboa_spa: mqtt_command_state: true`. The preserved
 `balboa-passive.yaml` and its rollback behavior are unchanged.
 
 ### Upgrade cleanup
@@ -156,4 +172,8 @@ When migrating from the earlier firmware, delete obsolete retained values from
 `balboa/waveshare/status` (previous availability), `balboa/waveshare/debug`
 (previous log output), and `balboa/waveshare/diagnostics/boot`. Clear any retained
 per-entity state values as well; schema v2 entity states are non-retained. This
-deployment tombstoned the old state values and those three legacy topics.
+deployment also tombstoned `homeassistant/fan/waveshare-balboa/spa_jets/config`
+and `homeassistant/switch/waveshare-balboa/spa_jets_power/config`. The retained
+`homeassistant/switch/waveshare-balboa/spa_jets/config` now describes the single
+on/off Jets switch. The old state values and three legacy root topics above were
+also tombstoned.

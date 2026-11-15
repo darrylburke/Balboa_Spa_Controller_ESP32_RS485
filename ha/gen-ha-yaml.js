@@ -11,15 +11,15 @@
 // Paste the output into the existing `mqtt:` list in configuration.yaml.
 
 const TARGETS = {
-  real: { prefix: 'spa',     id: 'balboa_spa',     label: 'Spa',     devName: 'Balboa Spa' },
-  sim:  { prefix: 'spa-sim', id: 'balboa_spa_sim', label: 'Spa Sim', devName: 'Balboa Spa (Simulated)' },
+  real: { prefix: 'spa',     id: 'balboa_spa',     label: 'Spa',     devName: 'Balboa Spa', model: 'BP200G1' },
+  sim:  { prefix: 'spa-sim', id: 'balboa_spa_sim', label: 'Spa Sim', devName: 'Balboa Spa (Simulated)', model: 'BP200G1 (simulated)' },
 };
 
 const which = process.argv[2] || 'real';
 const T = TARGETS[which];
 if (!T) { console.error(`usage: gen-ha-yaml.js [real|sim]`); process.exit(1); }
 
-const { prefix: P, id: ID, label: L, devName } = T;
+const { prefix: P, id: ID, label: L, devName, model } = T;
 
 const dev = (ind) => {
   const p = ' '.repeat(ind);
@@ -28,7 +28,7 @@ const dev = (ind) => {
     `${p}  identifiers: "${ID}"`,
     `${p}  name: "${devName}"`,
     `${p}  manufacturer: "Balboa Water Group"`,
-    `${p}  model: "CNBP501X"`,
+    `${p}  model: "${model}"`,
   ].join('\n');
 };
 
@@ -71,8 +71,23 @@ push(`  - climate:
 ${avail(6)}
 ${dev(6)}`);
 
-// --- fan: jets. HA maps percentage onto the 1..2 speed range. ---
-push(`  - fan:
+// Real spa uses an on/off switch; the simulator keeps speed selection for tests.
+if (which === 'real') {
+  push(`  - switch:
+      name: "${L} Jets"
+      unique_id: ${ID}_jets
+      state_topic: "${P}/switch/spa_jets/state"
+      command_topic: "${P}/switch/spa_jets/command"
+      payload_on: "ON"
+      payload_off: "OFF"
+      state_on: "ON"
+      state_off: "OFF"
+      optimistic: false
+      retain: false
+${avail(6)}
+${dev(6)}`);
+} else {
+  push(`  - fan:
       name: "${L} Jets"
       unique_id: ${ID}_jets
       state_topic: "${P}/fan/spa_jets/state"
@@ -86,6 +101,7 @@ push(`  - fan:
       retain: false
 ${avail(6)}
 ${dev(6)}`);
+}
 
 // --- switches ---
 for (const [obj, name] of [['spa_light', 'Light'], ['spa_hold', 'Hold']]) {

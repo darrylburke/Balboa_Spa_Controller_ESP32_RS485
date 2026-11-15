@@ -32,7 +32,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - fan:
       name: "Spa Sim Jets"
@@ -54,7 +54,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - switch:
       name: "Spa Sim Light"
@@ -75,7 +75,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - switch:
       name: "Spa Sim Hold"
@@ -96,7 +96,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - select:
       name: "Spa Sim Heating Mode"
@@ -113,7 +113,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - select:
       name: "Spa Sim Temperature Range"
@@ -130,7 +130,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - select:
       name: "Spa Sim Temperature Scale"
@@ -147,7 +147,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - sensor:
       name: "Spa Sim Current Temperature"
@@ -165,7 +165,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - sensor:
       name: "Spa Sim Target Temperature"
@@ -183,7 +183,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - sensor:
       name: "Spa Sim Model"
@@ -197,7 +197,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - sensor:
       name: "Spa Sim Firmware Version"
@@ -211,7 +211,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - sensor:
       name: "Spa Sim Notification"
@@ -225,7 +225,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - binary_sensor:
       name: "Spa Sim Heating"
@@ -242,7 +242,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - binary_sensor:
       name: "Spa Sim Priming"
@@ -258,7 +258,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - binary_sensor:
       name: "Spa Sim Filter Cycle 1 Running"
@@ -275,7 +275,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - binary_sensor:
       name: "Spa Sim Circulation Pump"
@@ -292,7 +292,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - binary_sensor:
       name: "Spa Sim Bus Connected"
@@ -309,7 +309,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - number:
       name: "Spa Sim Filter 1 Start Hour"
@@ -330,7 +330,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - number:
       name: "Spa Sim Filter 1 Duration"
@@ -351,7 +351,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - button:
       name: "Spa Sim Clear Notification"
@@ -367,7 +367,7 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"
 
   - button:
       name: "Spa Sim Normal Operation"
@@ -383,4 +383,4 @@
         identifiers: "balboa_spa_sim"
         name: "Balboa Spa (Simulated)"
         manufacturer: "Balboa Water Group"
-        model: "CNBP501X"
+        model: "BP200G1 (simulated)"

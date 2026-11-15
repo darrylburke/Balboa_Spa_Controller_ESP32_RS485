@@ -64,7 +64,9 @@ on insulation reads fine upstream and nothing at the terminal.
 
 Keep the validated passive configuration until active commissioning is explicitly
 approved. The ownership correction has host-test coverage, not validation on the
-BP200G1/TP500 bus. Review [channel ownership](channel-ownership.md) first.
+BP200G1/TP500 bus. The repository's hardware-confirmed notes below are for a
+different CNBP501X pack. Review [channel ownership](channel-ownership.md) and the
+[current commissioning status](bp200g1-commissioning.md) first.
 
 Saved channels now log as unverified; they never authorize a response after boot.
 Fresh registration is required. After ownership is established, loss of polling
@@ -74,10 +76,10 @@ messages or speculative response delays are added.
 ### Bus hygiene
 - Channels are assigned up to `0x2f` and are **never reclaimed** — there is no
   deregister message anywhere in the protocol. Leaked channels keep being polled
-  forever and measurably degrade the bus (observed with five dead channels:
-  Ready→response latency 1.19 ms → 14.17 ms, status rate down ~18%).
-- **A spa power cycle is the only known way to clear them.** Worth doing before a
-  first flash so the ESP32 starts on a clean bus.
+  according to historical CNBP501X observations. Those measurements are not
+  evidence for the BP200G1/TP500.
+- Do not power-cycle the spa as routine bring-up or to force channel cleanup; it is
+  a physical intervention and does not prove the gateway has safe ownership.
 - Polling `0x10` does not establish which device owns it. Coexistence must be
   validated on the actual controller/topside combination.
 

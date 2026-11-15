@@ -1,37 +1,28 @@
-# BP200G1 / TP500 engineering report
+# BP200G1 / TP500 engineering summary
 
-The initial root-cause review and ownership correction were committed as `187887c`.
-The subsequent offline audit is recorded in [the readiness checklist](offline-readiness.md),
-with final commit IDs, exact test/build results, hashes and separated patch series
-in `.esphome/offline-review/`. The preserved earlier record remains under
-`.esphome/coexistence-review/`.
+This PR fixes unsafe assumptions in the shared-bus client and adds typed MQTT
+status, bounded event provenance, and checked UART writes. The first ownership
+correction is in commit `187887c`; the reviewable source history is the PR commit
+series. Test/build evidence and limits are in
+[`offline-readiness.md`](offline-readiness.md).
 
-Confirmed defects included restored identity granting authority, unsolicited
-assignment adoption, stale queued addresses, public-queue handshake injection,
-transport loss retaining authority, and treating failed ACK writes as successful.
-These are source/test findings. The TP500's physical ownership of 0x10 and the
-precise cause of earlier electrical collisions remain hypotheses.
+The main design choices are deliberate:
 
-Fixes preserve registration messages, supported correlation checks and mandatory
-registered polls. Final UART read-only protection covers every local entry point.
-Checked UART outcomes revoke authority on local failure, without retrying toggles.
-Optional bounded event provenance exposes local timestamps/order/outcomes; legacy
-30-second MQTT fields remain unchanged. No source change supplies proof of wire
-receipt, exclusive ownership, controller acceptance, or physical command execution.
+- A stored channel is not identity. Only a correlated fresh registration grants
+  TX authority; same-hash and delayed responses remain ambiguous.
+- Balboa commands are toggles without an ACK. The queue has a freshness limit and
+  no blind retry or automatic reconciliation, because a repeated toggle can undo
+  a successful but unobserved action.
+- MQTT entity state stays plain and per-entity for HA. Human-readable runtime JSON
+  is on-demand on `/status`; high-rate diagnostics previously contributed to
+  outbound queue pressure.
+- UART failures revoke authority and latch writes off for that boot. This avoids
+  sending a buffered tail after a timeout; the bound is local to the IDF drain,
+  not a controller timing guarantee.
 
-[Command findings](command-lifecycle.md) distinguish proven queue/tester issues from
-unverified pump and heating-mode behavior. TTL and observed-panel cancellation are
-bounded safeguards, not speculative closed-loop reconciliation. The registration-
-only gate suppresses application/config/time-sync writes while preserving handshake
-and idle replies. It does not enable active mode.
-
-Residual risks include same-hash and delayed assignments, missed conflicting
-reallocation, buffered/late poll handling, electrical/driver timing, and uncertain
-or duplicate non-idempotent commands. Those require the [staged procedure](bp200g1-commissioning.md):
-registration evidence, coexistence with responsive TP500, single Light action, then
-only evidence-supported Jets/heating tests. No physical stage was executed.
-
-The EC2 collector's receipt/persistence is UNKNOWN; an [undeployed integration](rs485-collector.md)
-is supplied without changing credentials, services, infrastructure or Home Assistant.
-The known-good passive configuration and binary hashes are preserved. The spa has
-not been declared fixed or ready for unattended control.
+The operator reports v11 OTA success and a successful Light OFF. That is useful
+physical evidence, but no direction-aware bus trace is attached to this PR. It
+does not establish exclusive ownership, controller acceptance, or reliable
+unattended control. Other gaps and next evidence are listed in
+[`PROJECT_STATE.md`](../PROJECT_STATE.md) and the
+[`commissioning guide`](bp200g1-commissioning.md).

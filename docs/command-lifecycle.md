@@ -2,9 +2,16 @@
 
 The BP200G1's physical speed/mode behavior is not established by the repository's
 historical CNBP501X profile. This review distinguishes source arithmetic from
-observed physical effect. No remote command was sent during this task.
+physical evidence; operator-reported results and remaining gaps are in
+[`PROJECT_STATE.md`](../PROJECT_STATE.md).
 
 ## Confirmed source behavior and defects
+
+The TP500 can cause an item-toggle frame on the shared bus, but the frame does not
+authenticate which client caused it. If a Waveshare toggle is queued from the last
+observed state and another client changes that item before the next READY, the
+queued toggle can undo that action. This is why matching unsent toggles are
+cancelled, commands expire, and uncertain commands are never retried.
 
 - MQTT Jets OFF reaches `BalboaFan::control()` with state=false, then
   `ProtocolEngine::set_pump(index, 0)`. It is not a direct hardware OFF command.
@@ -71,5 +78,6 @@ whether another toggle advances the user's goal or reverses a physical action.
 Before implementing it, collect raw inventory, status and panel-toggle traces for
 Light, single/two-speed Jets, OFF, READY/REST/READY_IN_REST and automatic heating
 or filtration interventions. Record status latency and duplicate/reconnection cases.
-The first physical control gate is a single Light action after coexistence; Jets
-and heating changes remain deferred until those facts are available.
+The reported Light OFF proves one physical effect only; it does not resolve command
+attribution or establish Jets/heating behavior. Keep unattended reconciliation
+deferred until those facts are available.
